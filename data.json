@@ -1,0 +1,70 @@
+{
+  "commands": [
+    {
+      "trigger": "ta chọn ngươi",
+      "matchType": "exact",
+      "enabled": true,
+      "pick": "first",
+      "replyMode": "reply",
+      "rules": [
+        {
+          "conditions": [
+            {
+              "type": "userId",
+              "op": "is",
+              "value": "946662197168341053"
+            }
+          ],
+          "replies": [
+            "**xuân thu tất thành** {xuân thu tất thành} "
+          ],
+          "deleteAfter": 0,
+          "action": {
+            "type": "none",
+            "target": "sender",
+            "minutes": 10
+          }
+        }
+      ],
+      "defaultReplies": [
+        "kiến cỏ phàm nhân sâu kiến sủa gì vậy!!!!"
+      ],
+      "defaultAction": {
+        "type": "none",
+        "target": "sender",
+        "minutes": 1,
+        "reason": "hỗn"
+      }
+    },
+    {
+      "trigger": "",
+      "matchType": "contains",
+      "enabled": true,
+      "pick": "random",
+      "replyMode": "reply",
+      "deleteAfter": 0,
+      "rules": [],
+      "defaultReplies": [
+        "Xin chào {user}!"
+      ],
+      "defaultAction": {
+        "type": "none",
+        "target": "sender",
+        "minutes": 10
+      }
+    }
+  ],
+  "tags": [
+    {
+      "name": "xuân thu tất thành",
+      "type": "link",
+      "value": "https://media.discordapp.net/attachments/1552468487358779513/1554528970811383889/snaptik.vn_7633750466664369428.mp4?backend=b2&ex=6abd376c&is=6abbe5ec&hm=dc022bee6eb2f71e9c3f97d08b94adb75c57fc0cca589fcc24e9898e8140128a&",
+      "label": "-"
+    },
+    {
+      "name": "",
+      "type": "video",
+      "value": ""
+    }
+  ]
+}
