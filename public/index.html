@@ -1,0 +1,76 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bot Discord - Quản trị</title>
+<style>
+:root{--bg:#1e1f22;--card:#2b2d31;--in:#1e1f22;--tx:#f2f3f5;--mu:#949ba4;--ac:#5865f2;--rd:#da373c;--gr:#23a55a}
+*{box-sizing:border-box}body{margin:0;font:14px system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+.w{max-width:900px;margin:auto;padding:16px}h1{font-size:20px}
+.card{background:var(--card);border-radius:8px;padding:12px;margin:10px 0}
+input,select,textarea{background:var(--in);color:var(--tx);border:1px solid #3f4147;border-radius:4px;padding:6px 8px;font:inherit}
+textarea{width:100%;min-height:70px}input.f{width:100%}
+button{background:var(--ac);color:#fff;border:0;border-radius:4px;padding:6px 12px;cursor:pointer;font:inherit}
+button.d{background:var(--rd)}button.g{background:var(--gr)}button.s{background:#4e5058}
+.r{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0}.mu{color:var(--mu);font-size:12px}
+.rule{border-left:3px solid var(--ac);padding-left:10px;margin:10px 0}label{display:block;margin-top:6px;color:var(--mu);font-size:12px}
+.bar{position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:9;display:flex;gap:8px;align-items:center}
+</style></head><body><div class="w"><h1>🤖 Quản trị Bot Discord</h1><div id="app"></div></div>
+<script>
+let pw=sessionStorage.pw||'',D=null,tab='cmd';
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+async function api(m,b){const r=await fetch('/api/data',{method:m,headers:{'Content-Type':'application/json','x-password':pw},body:b?JSON.stringify(b):undefined});
+ if(!r.ok)throw new Error((await r.json()).error);return r.json()}
+async function init(){try{D=await api('GET');sessionStorage.pw=pw;draw()}catch{login()}}
+function login(){app.innerHTML=`<div class="card"><label>Mật khẩu quản trị (ADMIN_PASSWORD)</label><div class="r"><input id=p type=password><button onclick="pw=p.value;init()">Đăng nhập</button></div></div>`}
+// đặt giá trị theo đường dẫn "commands.0.rules.1.conditions.0.type"
+function S(p,v){let o=D,k=p.split('.');for(let i=0;i<k.length-1;i++)o=o[k[i]];o[k.at(-1)]=v}
+const B=(p,v,a,b)=>`<select onchange="S('${p}',this.value=='true')"><option value="true" ${v?'selected':''}>${a}</option><option value="false" ${v?'':'selected'}>${b}</option></select>`;
+const N=(p,v)=>`<input type=number min=0 style="width:70px" value="${+v||0}" oninput="S('${p}',+this.value)">`;
+const SR=(p,v,o)=>`<select onchange="S('${p}',this.value);draw()">${o.map(([a,b])=>`<option value="${a}" ${a==v?'selected':''}>${b}</option>`).join('')}</select>`;
+const PH=(h,t)=>h.replace('<input','<input placeholder="'+t+'"');
+const ACT=(p,a)=>`<div class="r" style="background:#1e1f22;padding:6px;border-radius:6px"><span class="mu">⚡ Hành động thêm:</span>${SR(p+'.type',a.type,[['none','Không'],['mute','Mute (timeout)'],['unmute','Bỏ mute'],['kick','Kick'],['ban','Ban'],['deleteMsg','Xóa tin nhắn người gõ'],['addRole','Thêm role'],['removeRole','Gỡ role']])}
+${a.type!='none'&&a.type!='deleteMsg'?SR(p+'.target',a.target,[['sender','lên người gõ tin'],['mention','lên người được @tag trong tin'],['id','lên ID tùy chỉnh']]):''}
+${a.type!='none'&&a.type!='deleteMsg'&&a.target=='id'?PH(I(p+'.targetId',a.targetId),'ID người dùng'):''}
+${a.type=='mute'?'<span class="mu">số phút:</span>'+N(p+'.minutes',a.minutes):''}
+${a.type=='addRole'||a.type=='removeRole'?PH(I(p+'.roleId',a.roleId),'ID role'):''}
+${['mute','kick','ban'].includes(a.type)?PH(I(p+'.reason',a.reason),'Lý do (tùy chọn)'):''}</div>`;
+const I=(p,v,c='')=>`<input class="${c}" value="${esc(v)}" oninput="S('${p}',this.value)">`;
+const SEL=(p,v,opts)=>`<select onchange="S('${p}',this.value)">${opts.map(([a,b])=>`<option value="${a}" ${a==v?'selected':''}>${b}</option>`).join('')}</select>`;
+const TA=(p,arr)=>`<textarea oninput="S('${p}',this.value.split('\\n'))" placeholder="Mỗi dòng = 1 cách trả lời">${esc((arr||[]).join('\n'))}</textarea>`;
+function add(p,v){let o=D;p.split('.').forEach(k=>o=o[k]);o.push(v);draw()}
+function del(p,i){let o=D;p.split('.').forEach(k=>o=o[k]);o.splice(i,1);draw()}
+const newCmd=()=>({trigger:'',matchType:'contains',enabled:true,pick:'random',replyMode:'reply',deleteAfter:0,rules:[],defaultReplies:['Xin chào {user}!']});
+const newRule=()=>({conditions:[{type:'userId',op:'is',value:''}],replies:[''],deleteAfter:0});
+function draw(){
+ D.commands.forEach(c=>{c.defaultAction??={type:'none',target:'sender',minutes:10};(c.rules||[]).forEach(q=>q.action??={type:'none',target:'sender',minutes:10})});
+ let h=`<div class="bar"><button class="s" onclick="tab='cmd';draw()">Lệnh</button><button class="s" onclick="tab='tag';draw()">Thẻ tùy chỉnh</button>
+ <button class="g" onclick="saveAll()">💾 Lưu</button><span id=st class="mu"></span></div>`;
+ if(tab=='tag'){
+  h+=`<div class="mu">Dùng trong câu trả lời bằng <b>{tên_thẻ}</b>. Loại "mention" = tag người theo ID, "video/text" = chèn link hoặc chữ.</div>`;
+  D.tags.forEach((t,i)=>h+=`<div class="card r">${I(`tags.${i}.name`,t.name)}<select onchange="S('tags.${i}.type',this.value);draw()">${[['mention','Tag người (ID)'],['video','Link video'],['link','Link có tên (bấm vào chữ)'],['text','Văn bản']].map(([a,b])=>`<option value="${a}" ${a==t.type?'selected':''}>${b}</option>`).join('')}</select>${I(`tags.${i}.value`,t.value,'f').replace('<input','<input placeholder="ID / link / văn bản"')}${t.type=='link'?I(`tags.${i}.label`,t.label).replace('<input','<input placeholder="Chữ hiển thị, vd: xuân thu tất thành"')+B(`tags.${i}.hide`,t.hide,'Ẩn preview video','Hiện preview video'):''}<button class="d" onclick="del('tags',${i})">Xóa</button></div>`);
+  h+=`<button onclick="add('tags',{name:'',type:'video',value:''})">+ Thêm thẻ</button>`;
+ }else{
+  h+=`<div class="mu">Biến có sẵn: {user} (tag người nhắn), {userId}, {username}, {roles}, {server}, {channel} + các thẻ tùy chỉnh. Quy tắc chạy từ trên xuống, quy tắc đầu tiên khớp hết điều kiện sẽ được dùng; không khớp thì dùng "Trả lời mặc định".</div>`;
+  D.commands.forEach((c,i)=>{const P=`commands.${i}`;
+   h+=`<div class="card"><div class="r">${I(P+'.trigger',c.trigger)}
+    ${SEL(P+'.matchType',c.matchType,[['contains','Chứa'],['exact','Đúng hệt'],['startsWith','Bắt đầu bằng'],['regex','Regex']])}
+    ${SEL(P+'.replyMode',c.replyMode,[['reply','Reply tin nhắn'],['send','Gửi vào kênh'],['none','Không trả lời (chỉ hành động)']])}
+    ${SEL(P+'.pick',c.pick,[['random','Chọn ngẫu nhiên'],['first','Lấy câu đầu']])}
+    ${SEL(P+'.enabled',String(c.enabled!==false),[['true','Bật'],['false','Tắt']]).replace('S(\''+P+'.enabled\',this.value)','S(\''+P+'.enabled\',this.value==\'true\')')}
+    <span class="mu">Tự xóa sau (giây, 0 = không):</span>${N(P+'.deleteAfter',c.deleteAfter)}
+    <button class="d" onclick="del('commands',${i})">Xóa lệnh</button></div>`;
+   (c.rules||[]).forEach((r,j)=>{const R=`${P}.rules.${j}`;
+    h+=`<div class="rule"><b>Nếu</b> (tất cả điều kiện đúng):`;
+    r.conditions.forEach((cd,k)=>h+=`<div class="r">${SEL(`${R}.conditions.${k}.type`,cd.type,[['userId','ID người dùng'],['username','Tên người dùng'],['mentionId','ID người được @tag trong tin'],['roleId','ID role'],['roleName','Tên role'],['channelId','ID kênh'],['guildId','ID server']])}
+      ${SEL(`${R}.conditions.${k}.op`,cd.op,[['is','là'],['not','KHÔNG là']])}${I(`${R}.conditions.${k}.value`,cd.value,'f')}<button class="d" onclick="del('${R}.conditions',${k})">x</button></div>`);
+    h+=`<button class="s" onclick="add('${R}.conditions',{type:'userId',op:'is',value:''})">+ điều kiện</button> <span class="mu">nhiều giá trị ngăn bằng dấu phẩy = một trong số đó</span>
+     <label>Trả lời (mỗi dòng 1 cách):</label>${TA(R+'.replies',r.replies)}${ACT(R+'.action',r.action)}
+     <div class="r"><span class="mu">Tự xóa sau (giây, 0 = theo lệnh):</span>${N(R+'.deleteAfter',r.deleteAfter)}</div>
+     <button class="d" onclick="del('${P}.rules',${j})">Xóa quy tắc</button></div>`});
+   h+=`<button class="s" onclick="add('${P}.rules',newRule())">+ Quy tắc theo ID / role / kênh</button>
+    <label>Trả lời KHI KHÔNG KHỚP quy tắc nào (vd: ID không nằm trong danh sách):</label>${TA(P+'.defaultReplies',c.defaultReplies)}${ACT(P+'.defaultAction',c.defaultAction)}</div>`});
+  h+=`<button onclick="add('commands',newCmd())">+ Thêm lệnh</button>`;
+ }
+ app.innerHTML=h}
+async function saveAll(){D.commands.forEach(c=>{c.defaultReplies=(c.defaultReplies||[]).filter(x=>x.trim());c.rules.forEach(r=>r.replies=r.replies.filter(x=>x.trim()))});
+ try{await api('PUT',D);st.textContent='✅ Đã lưu, bot áp dụng ngay';draw()}catch(e){st.textContent='❌ '+e.message}}
+init();
+</script></body></html>
