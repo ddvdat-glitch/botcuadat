@@ -574,7 +574,9 @@ function parseArgs(s, text) {
 }
 
 // Nội dung để khớp lệnh: tin của người = content; tin của bot = content + chữ trong embed (bot game thường gửi embed)
-const textOf = msg => !msg.author.bot ? (msg.content || '') : [msg.content, ...(msg.embeds || []).flatMap(e => [e.title, e.description, ...(e.fields || []).flatMap(f => [f.name, f.value]), e.footer?.text])]
+// Marker đặc biệt để script (regex) nhận ra: tin có sticker -> [[STICKER:id]]; bot bị tag/reply -> [[BOT_TAGGED]] (đặt ở CUỐI để không phá lệnh startsWith)
+const isBotTagged = msg => !!client.user && (msg.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true }) || msg.mentions.repliedUser?.id === client.user.id);
+const textOf = msg => !msg.author.bot ? [msg.content, ...[...(msg.stickers?.values() || [])].map(s => `[[STICKER:${s.id}]]`), isBotTagged(msg) ? '[[BOT_TAGGED]]' : ''].filter(Boolean).join('\n') : [msg.content, ...(msg.embeds || []).flatMap(e => [e.title, e.description, ...(e.fields || []).flatMap(f => [f.name, f.value]), e.footer?.text])]
   .filter(Boolean).join('\n').normalize('NFC');
 
 function buildCtx(msg, pa, text = msg.content) {
@@ -588,8 +590,23 @@ function buildCtx(msg, pa, text = msg.content) {
       isAdmin: !!m?.permissions.has('Administrator'), isOwner: msg.guild?.ownerId === msg.author.id
     },
     mentions: [...msg.mentions.users.values()].map(u => ({ id: u.id, username: u.username, mention: `<@${u.id}>` })),
-    channelId: msg.channel.id, guildId: msg.guild?.id || '', guildName: msg.guild?.name || '', messageId: msg.id, now: Date.now()
+    channelId: msg.channel.id, guildId: msg.guild?.id || '', guildName: msg.guild?.name || '', messageId: msg.id, now: Date.now(),
+    botId: client.user?.id || '', botTagged: isBotTagged(msg),
+    stickers: [...(msg.stickers?.values() || [])].map(s => ({ id: s.id, name: s.name, format: s.format })),
+    guildEmojis: msg.guild ? [...msg.guild.emojis.cache.values()].map(e => ({ id: e.id, name: e.name, animated: !!e.animated })) : [],
+    guildStickers: msg.guild ? [...msg.guild.stickers.cache.values()].map(s => ({ id: s.id, name: s.name })) : [],
+    limits: guildLimits(msg.guild),
+    reply: null // được điền ở execScript nếu tin này là reply
   };
+}
+
+// Giới hạn emoji / sticker theo cấp boost của server
+function guildLimits(g) {
+  if (!g) return {};
+  const tier = Number(g.premiumTier) || 0;
+  const emojiMax = [50, 100, 150, 250][tier] || 50, stickerMax = [5, 15, 30, 60][tier] || 5;
+  const em = [...g.emojis.cache.values()];
+  return { emojiMax, stickerMax, emojiStatic: em.filter(e => !e.animated).length, emojiAnimated: em.filter(e => e.animated).length, stickerUsed: g.stickers.cache.size };
 }
 
 async function handleScripts(msg) {
@@ -613,6 +630,10 @@ async function handleScripts(msg) {
 async function execScript(s, msg, text = msg.content) {
   const pa = parseArgs(s, text);
   const ctx = buildCtx(msg, pa, text);
+  if (msg.reference?.messageId) {
+    const ref = await msg.fetchReference().catch(() => null);
+    if (ref) ctx.reply = { id: ref.id, content: String(ref.content || '').slice(0, 500), authorId: ref.author.id, authorName: ref.author.username, isBot: !!ref.author.bot, toMe: ref.author.id === client.user?.id };
+  }
   const r = await runScript(s.language, s.code, { ctx, store: clone(db.scriptData.byScript[s.id]), shared: clone(db.scriptData.shared) }, s.timeoutMs);
   if (!r.ok) {
     log('error', `Script "${s.name}" lỗi (${r.ms}ms):\n${r.error}`, { user: msg.author.username, channel: chName(msg) });
@@ -626,6 +647,32 @@ async function execScript(s, msg, text = msg.content) {
   await applyScriptOutput(s, msg, r.out || {});
 }
 
+// Clone emoji / sticker từ CDN Discord vào server hiện tại (bot cần quyền Manage Guild Expressions)
+async function cloneExpression(a, msg) {
+  const guild = msg.guild; if (!guild) return;
+  const url = String(a.url || '');
+  if (!/^https:\/\/(cdn\.discordapp\.com|media\.discordapp\.net)\//.test(url)) return log('error', 'Clone: URL không hợp lệ ' + url.slice(0, 80), { user: msg.author.username });
+  let name = String(a.name || 'clone').replace(/[^\w]/g, '_').slice(0, 32); if (name.length < 2) name = (name + '__').slice(0, 2);
+  const reason = 'Clone từ ' + msg.author.username;
+  try {
+    if (a.type === 'addEmoji') {
+      const e = await guild.emojis.create({ attachment: url, name, reason });
+      log('action', `Đã thêm emoji :${e.name}: (${e.id})`, { user: msg.author.username });
+      await msg.react(e).catch(() => {});
+      await say(msg, `✅ Đã thêm emoji ${e} \`:${e.name}:\` vào server.`, { mode: 'send', deleteAfter: 15 });
+    } else {
+      let tags = name, description = '';
+      if (a.stickerId) { const src = await client.fetchSticker(String(a.stickerId)).catch(() => null); if (src) { tags = src.tags || name; description = src.description || ''; } }
+      const st = await guild.stickers.create({ file: url, name: name.length < 2 ? 'sticker' : name, tags: String(tags).slice(0, 200) || name, description: String(description).slice(0, 100), reason });
+      log('action', `Đã thêm sticker "${st.name}" (${st.id})`, { user: msg.author.username });
+      await say(msg, `✅ Đã thêm sticker **${st.name}** vào server.`, { mode: 'send', deleteAfter: 15 });
+    }
+  } catch (e) {
+    log('error', `Clone ${a.type} lỗi: ${e.message}`, { user: msg.author.username });
+    await say(msg, `❌ Không thêm được: ${String(e.message).slice(0, 200)}`, { mode: 'send', deleteAfter: 15 });
+  }
+}
+
 async function applyScriptOutput(s, msg, out) {
   const mode = s.replyMode === 'send' ? 'send' : 'reply';
   const texts = (out.replies || []).slice(0, 5);
@@ -634,6 +681,7 @@ async function applyScriptOutput(s, msg, out) {
   if (out.delete) await execAction({ type: 'deleteMsg' }, msg);
   for (const a of (out.actions || []).slice(0, 5)) {
     const t = String(a.target || 'sender');
+    if (a.type === 'addEmoji' || a.type === 'addSticker') { await cloneExpression(a, msg); continue; }
     const act = { type: a.type, seconds: a.seconds, delay: a.delay, reason: a.reason, roleId: a.roleId, target: 'sender' };
     if (t === 'mention') act.target = 'mention';
     else if (t !== 'sender') { act.target = 'id'; act.targetId = t; }
