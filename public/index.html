@@ -81,7 +81,7 @@ function del(p,i){let o=D;p.split('.').forEach(k=>o=o[k]);o.splice(i,1);draw()}
 const newAct=()=>({type:'none',target:'sender',seconds:60,delay:0});
 const newCmd=()=>({trigger:'',matchType:'contains',enabled:true,pick:'random',replyMode:'reply',deleteAfter:0,rules:[],defaultReplies:['Xin chào {user}!']});
 const newRule=()=>({conditions:[{type:'userId',op:'is',value:''}],replies:[''],deleteAfter:0});
-const newScript=()=>{const py=D.runtimes?.python?.ok;return {id:'s'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),name:'Script mới',enabled:true,language:py?'python':'javascript',trigger:'!lenh',matchType:'startsWith',replyMode:'reply',cooldown:0,deleteAfter:0,channels:'',timeoutMs:5000,code:py?"reply(f\"Xin chào {ctx['user']['mention']}!\")":"reply('Xin chào ' + ctx.user.mention + '!');"}};
+const newScript=()=>{const py=D.runtimes?.python?.ok;return {id:'s'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),name:'Script mới',enabled:true,language:py?'python':'javascript',trigger:'!lenh',matchType:'startsWith',replyMode:'reply',cooldown:0,deleteAfter:0,channels:'',fromIds:'',timeoutMs:5000,code:py?"reply(f\"Xin chào {ctx['user']['mention']}!\")":"reply('Xin chào ' + ctx.user.mention + '!');"}};
 async function pull(){const n=await api('GET');D.roles=n.roles;D.channels=n.channels;D.members=n.members;D.scriptData=n.scriptData;D.runtimes=n.runtimes}
 async function go(t){tab=t;stopLog();if(t!='log'){try{await pull()}catch{}}draw();if(t=='log')startLog()}
 const TABS=[['cmd','Lệnh'],['tag','Thẻ'],['script','Script (Python/JS)'],['role','Role & phân cấp'],['log','Log']];
@@ -141,6 +141,7 @@ function drawScript(){
    <span class="mu">Tự xóa trả lời sau (giây):</span>${N(P+'.deleteAfter',s.deleteAfter)}
    <span class="mu">Giới hạn chạy (ms):</span><input type=number style="width:80px" min=500 max=15000 value="${+s.timeoutMs||5000}" oninput="S('${P}.timeoutMs',+this.value)"></div>
    <div class="r"><span class="mu">Chỉ chạy ở kênh (ID, cách nhau dấu phẩy, trống = mọi kênh):</span>${PH(I(P+'.channels',s.channels,'f'),'ID kênh')}${PK('channel',P+'.channels','append')}</div>
+   <div class="r"><span class="mu">Chỉ nhận tin từ ID (người hoặc bot, cách nhau dấu phẩy; trống = mọi người trừ bot):</span>${PH(I(P+'.fromIds',s.fromIds,'f'),'ID người / bot')}</div>
    <textarea class="code" spellcheck="false" oninput="S('${P}.code',this.value)" onkeydown="if(event.key=='Tab'){event.preventDefault();this.setRangeText('    ',this.selectionStart,this.selectionEnd,'end');S('${P}.code',this.value)}">${esc(s.code)}</textarea>
    <div class="r"><input id="tt_${s.id}" style="flex:1;min-width:200px" placeholder="Tin nhắn thử, vd: ${esc(s.trigger)} tai 100" value="${esc(s.trigger)} ">
     <label class="lt"><input type=checkbox id="tp_${s.id}"> ghi dữ liệu</label><button class="g" onclick="testScript(${i})">▶ Chạy thử</button></div>
@@ -155,7 +156,7 @@ function drawScript(){
  return h}
 function applyTpl(i,id){const t=TPLS.find(x=>x.id==id);if(!t)return;const s=D.scripts[i];
  if(s.code&&s.code.trim()&&!confirm('Ghi đè code hiện tại bằng mẫu "'+t.name+'"?')){draw();return}
- Object.assign(s,{name:t.name,language:t.language,trigger:t.trigger,matchType:t.matchType,cooldown:t.cooldown,code:t.code});draw()}
+ Object.assign(s,{name:t.name,language:t.language,trigger:t.trigger,matchType:t.matchType,cooldown:t.cooldown,code:t.code,replyMode:t.replyMode||'reply',fromIds:t.fromIds||'',timeoutMs:t.timeoutMs||5000});draw()}
 async function testScript(i){const s=D.scripts[i],o=document.getElementById('tr_'+s.id);o.style.display='block';o.textContent='⏳ đang chạy...';
  try{const r=await api('POST',{script:s,text:document.getElementById('tt_'+s.id).value,persist:document.getElementById('tp_'+s.id).checked},'/api/script/test');
   let t=(r.matched?'✅ Tin nhắn khớp lệnh':'⚠️ Tin nhắn KHÔNG khớp lệnh kích hoạt (vẫn chạy thử)')+` · ${r.ms}ms`+(r.persisted?' · đã ghi dữ liệu':' · không ghi dữ liệu')+'\n';

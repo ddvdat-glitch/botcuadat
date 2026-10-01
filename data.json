@@ -22,7 +22,8 @@
           "action": {
             "type": "none",
             "target": "sender",
-            "minutes": 10
+            "seconds": 600,
+            "delay": 0
           }
         }
       ],
@@ -32,8 +33,9 @@
       "defaultAction": {
         "type": "none",
         "target": "sender",
-        "minutes": 1,
-        "reason": "hỗn"
+        "reason": "hỗn",
+        "seconds": 60,
+        "delay": 0
       }
     },
     {
@@ -50,7 +52,8 @@
       "defaultAction": {
         "type": "none",
         "target": "sender",
-        "minutes": 10
+        "seconds": 600,
+        "delay": 0
       }
     }
   ],
@@ -65,6 +68,177 @@
       "name": "",
       "type": "video",
       "value": ""
+    }
+  ],
+  "settings": {
+    "hierarchy": {
+      "enabled": true,
+      "mute": {
+        "higher": {
+          "allow": true,
+          "reply": "",
+          "punish": {
+            "type": "none",
+            "seconds": 30
+          },
+          "deleteAfter": 10
+        },
+        "equal": {
+          "allow": false,
+          "reply": "{user} bạn cùng cấp với {target} nên không thể {action}.",
+          "punish": {
+            "type": "none",
+            "seconds": 30
+          },
+          "deleteAfter": 10
+        },
+        "lower": {
+          "allow": false,
+          "reply": "{user} bạn thấp cấp hơn {target} nên không thể {action}.",
+          "punish": {
+            "type": "none",
+            "seconds": 30
+          },
+          "deleteAfter": 10
+        }
+      },
+      "kick": {
+        "higher": {
+          "allow": true,
+          "reply": "",
+          "punish": {
+            "type": "none",
+            "seconds": 30
+          },
+          "deleteAfter": 10
+        },
+        "equal": {
+          "allow": false,
+          "reply": "{user} bạn cùng cấp với {target} nên không thể {action}.",
+          "punish": {
+            "type": "none",
+            "seconds": 30
+          },
+          "deleteAfter": 10
+        },
+        "lower": {
+          "allow": false,
+          "reply": "{user} bạn thấp cấp hơn {target} nên không thể {action}.",
+          "punish": {
+            "type": "none",
+            "seconds": 30
+          },
+          "deleteAfter": 10
+        }
+      },
+      "ban": {
+        "higher": {
+          "allow": true,
+          "reply": "",
+          "punish": {
+            "type": "none",
+            "seconds": 30
+          },
+          "deleteAfter": 10
+        },
+        "equal": {
+          "allow": false,
+          "reply": "{user} bạn cùng cấp với {target} nên không thể {action}.",
+          "punish": {
+            "type": "none",
+            "seconds": 30
+          },
+          "deleteAfter": 10
+        },
+        "lower": {
+          "allow": false,
+          "reply": "{user} bạn thấp cấp hơn {target} nên không thể {action}.",
+          "punish": {
+            "type": "none",
+            "seconds": 30
+          },
+          "deleteAfter": 10
+        }
+      },
+      "requirePerm": {
+        "enabled": true,
+        "reply": "{user} bạn không có quyền {action} (cần quyền: {perm}).",
+        "deleteAfter": 10
+      },
+      "botCannot": {
+        "reply": "Bot không thể {action} {target} (role của bot thấp hơn/bằng, người đó là Admin/chủ server, hoặc bot thiếu quyền).",
+        "deleteAfter": 10
+      }
+    }
+  },
+  "scriptData": {
+    "shared": {},
+    "byScript": {}
+  },
+  "roles": {},
+  "channels": {},
+  "members": {},
+  "timers": [],
+  "scripts": [
+    {
+      "id": "nap_tu_dien",
+      "name": "Nạp từ điển Viet*.txt (gửi link git)",
+      "enabled": true,
+      "language": "javascript",
+      "trigger": "https?://(www\\.)?(github\\.com|raw\\.githubusercontent\\.com)/\\S+",
+      "matchType": "regex",
+      "replyMode": "reply",
+      "cooldown": 5,
+      "deleteAfter": 0,
+      "channels": "",
+      "fromIds": "",
+      "timeoutMs": 15000,
+      "code": "// SCRIPT 1 - NẠP TỪ ĐIỂN: gửi link GitHub chứa các file Viet*.txt (Viet11K.txt, Viet22K.txt...) cho bot.\n// Bot tải về, gộp, nén và lưu vào data.json (shared.vtv_dict). Script 2 dùng dữ liệu này để đoán từ.\n// Link hỗ trợ: github.com/user/repo | .../tree/nhánh/thư-mục | .../blob/nhánh/file.txt | raw.githubusercontent.com/...\nconst zlib = require('zlib');\nconst ALLOWED_IDS = [];   // ID được phép nạp. Để trống = chỉ Admin / chủ server.\nif (!(ctx.user.isAdmin || ctx.user.isOwner || ALLOWED_IDS.includes(ctx.user.id))) return;\n\nconst NAME_RE = /(^|\\/)viet[^\\/]*\\.txt$/i;\nconst KNOWN = ['Viet11K.txt', 'Viet22K.txt', 'Viet39K.txt', 'Viet74K.txt'];\nconst UA = { 'User-Agent': 'discord-bot-nap-tu-dien' };\nconst enc = p => p.split('/').map(encodeURIComponent).join('/');\nconst rawUrl = (o, r, ref, p) => 'https://raw.githubusercontent.com/' + o + '/' + r + '/' + encodeURIComponent(ref) + '/' + enc(p);\nasync function getJson(u) {\n  const r = await fetch(u, { headers: { ...UA, Accept: 'application/vnd.github+json' } });\n  if (!r.ok) throw new Error('GitHub trả về ' + r.status + ' cho ' + u);\n  return r.json();\n}\nasync function exists(u) { try { return (await fetch(u, { method: 'HEAD', headers: UA })).ok; } catch { return false; } }\nasync function getText(u) {\n  const r = await fetch(u, { headers: UA });\n  if (!r.ok) throw new Error('Tải lỗi ' + r.status + ': ' + u);\n  const t = await r.text();\n  if (t.length > 6000000) throw new Error('File quá lớn: ' + u);\n  return t.replace(/^\\ufeff/, '');\n}\n\ntry {\n  const urls = (ctx.content.match(/https?:\\/\\/[^\\s<>)\\]]+/g) || []).map(u => u.replace(/[.,;]+$/, ''));\n  const files = [];\n  for (const url of urls) {\n    let U; try { U = new URL(url); } catch { continue; }\n    const host = U.hostname.toLowerCase().replace(/^www\\./, '');\n    const parts = U.pathname.split('/').filter(Boolean).map(decodeURIComponent);\n    if (host === 'raw.githubusercontent.com') {\n      if (/\\.txt$/i.test(U.pathname)) files.push({ name: parts[parts.length - 1], url });\n    } else if (host === 'github.com') {\n      const [o, r0, kind, ref, ...rest] = parts;\n      if (!o || !r0) continue;\n      const repo = r0.replace(/\\.git$/i, '');\n      if ((kind === 'blob' || kind === 'raw') && ref && rest.length) {\n        files.push({ name: rest[rest.length - 1], url: rawUrl(o, repo, ref, rest.join('/')) });\n        continue;\n      }\n      const prefix = kind === 'tree' ? rest.join('/') : '';\n      try {\n        const branch = kind === 'tree' && ref ? ref : (await getJson('https://api.github.com/repos/' + o + '/' + repo)).default_branch;\n        const tree = await getJson('https://api.github.com/repos/' + o + '/' + repo + '/git/trees/' + encodeURIComponent(branch) + '?recursive=1');\n        for (const t of tree.tree || []) {\n          if (t.type === 'blob' && NAME_RE.test(t.path) && (!prefix || t.path.startsWith(prefix + '/')))\n            files.push({ name: t.path.split('/').pop(), url: rawUrl(o, repo, branch, t.path) });\n        }\n      } catch (e) {\n        // API GitHub bị giới hạn lượt gọi / lỗi -> thử tải thẳng các tên file quen thuộc ở nhánh main, master\n        print('GitHub API lỗi (' + e.message + ') -> thử tải thẳng ' + KNOWN.join(', '));\n        for (const br of [kind === 'tree' && ref ? ref : null, 'main', 'master'].filter(Boolean)) {\n          const hits = [];\n          for (const nm of KNOWN) {\n            const u = rawUrl(o, repo, br, (prefix ? prefix + '/' : '') + nm);\n            if (await exists(u)) hits.push({ name: nm, url: u });\n          }\n          if (hits.length) { files.push(...hits); break; }\n        }\n      }\n    }\n  }\n  const uniq = [...new Map(files.map(f => [f.url, f])).values()].slice(0, 8);\n  if (!uniq.length) { reply('❌ Không thấy file Viet*.txt nào trong link này.'); return; }\n\n  // Cách đọc từ giống doan_tu.py: NFC, thường, bỏ dòng trống / có số, gộp dấu cách + gạch nối\n  const parse = text => {\n    const set = new Set();\n    for (const line of text.split(/\\r?\\n/)) {\n      const w = line.normalize('NFC').trim().toLowerCase();\n      if (!w || /\\d/.test(w)) continue;\n      set.add(w.replace(/[\\s\\-]+/g, ' '));\n    }\n    return [...set];\n  };\n  const loaded = await Promise.all(uniq.map(async f => ({ name: f.name, words: parse(await getText(f.url)) })));\n  loaded.sort((a, b) => a.words.length - b.words.length);   // file nhỏ = từ thông dụng hơn -> ưu tiên khi đoán\n\n  const seen = new Set(), all = [], bounds = [], info = [];\n  for (const f of loaded) {\n    let added = 0;\n    for (const w of f.words) if (!seen.has(w)) { seen.add(w); all.push(w); added++; }\n    bounds.push(all.length);\n    info.push({ name: f.name, words: f.words.length, added });\n  }\n  const C = zlib.constants;\n  const br = zlib.brotliCompressSync(Buffer.from(all.join('\\n'), 'utf8'), { params: { [C.BROTLI_PARAM_QUALITY]: 11 } }).toString('base64');\n  if (br.length > 450000) { reply('❌ Dữ liệu sau nén quá lớn (' + Math.round(br.length / 1024) + ' KB), vượt giới hạn output của bot (512 KB).'); return; }\n\n  shared.vtv_dict = { v: 1, src: urls.join(' '), at: ctx.now, total: all.length, bounds, files: info, br };\n  print('Đã nạp ' + all.length + ' từ, nén ' + Math.round(br.length / 1024) + ' KB');\n  reply('✅ Đã nạp **' + all.length.toLocaleString('en-US') + '** từ vào data.json (~' + Math.round(br.length / 1024) + ' KB nén).\\n' +\n    info.map(f => '• ' + f.name + ': ' + f.words + ' từ (mới ' + f.added + ')').join('\\n'));\n} catch (e) {\n  reply('❌ Nạp từ điển lỗi: ' + (e && e.message ? e.message : e));\n}"
+    },
+    {
+      "id": "vua_tv",
+      "name": "Vua Tiếng Việt - tự đoán từ",
+      "enabled": true,
+      "language": "javascript",
+      "trigger": "Từ\\s*cần\\s*đoán",
+      "matchType": "regex",
+      "replyMode": "send",
+      "cooldown": 0,
+      "deleteAfter": 0,
+      "channels": "",
+      "fromIds": "1248205177589334026",
+      "timeoutMs": 8000,
+      "code": "// SCRIPT 2 - VUA TIẾNG VIỆT (tự đoán): đọc tin của bot game, giải từ xáo chữ theo logic doan_tu.py rồi gửi đáp án vào kênh.\n// Chỉ nhận tin từ ID đã khai ở ô \"Chỉ nhận tin từ ID\" (cho phép cả bot). Cần nạp từ điển bằng Script 1 trước.\n// Mẫu tin: \"Từ cần đoán: c/ò/n/l/n/h/h/ạ/g (gồm 9 ký tự).\"\nconst zlib = require('zlib');\nconst MAX_SEND = 1;   // số đáp án gửi (xếp theo độ thông dụng). Nếu có nhiều từ cùng khớp, tăng lên 2-3 để thử thêm.\n\nconst lines = String(ctx.content || '').normalize('NFC').split('\\n');\nconst li = lines.findIndex(l => /từ\\s*cần\\s*đoán/i.test(l));\nif (li < 0) return;\nconst isL = c => /\\p{L}/u.test(c);\nconst take = l => l.replace(/^.*?từ\\s*cần\\s*đoán\\s*[*_\\x60~]*\\s*[:：]?/i, '').split(/\\(\\s*gồm/i)[0];\nlet chars = [...take(lines[li]).toLowerCase()].filter(isL);\nif (!chars.length && lines[li + 1]) chars = [...lines[li + 1].split(/\\(\\s*gồm/i)[0].toLowerCase()].filter(isL);\nconst declared = +((lines[li].match(/gồm\\s*(\\d+)/i) || [])[1] || 0);\nif (!chars.length) { print('Không đọc được ký tự từ tin nhắn.'); return; }\nif (declared && declared !== chars.length) print('Cảnh báo: đề ghi ' + declared + ' ký tự nhưng đọc được ' + chars.length);\n\nconst D = shared.vtv_dict;\nif (!D || !D.br) { print('Chưa có từ điển. Admin hãy gửi link git chứa Viet*.txt cho bot (Script 1).'); return; }\nconst words = zlib.brotliDecompressSync(Buffer.from(D.br, 'base64')).toString('utf8').split('\\n');\nconst tierOf = i => { let t = 0; while (t < D.bounds.length - 1 && i >= D.bounds[t]) t++; return t; };\n\nconst lettersOf = w => [...w].filter(isL);\nconst strip = s => s.replace(/đ/g, 'd').replace(/Đ/g, 'D').normalize('NFD').replace(/\\p{Mn}/gu, '').normalize('NFC');\nconst n = chars.length;\nconst key = chars.slice().sort().join('');\nconst lkey = [...strip(chars.join(''))].sort().join('');\n\n// 1) khớp đúng dấu  2) khớp bỏ dấu  3) gợi ý thiếu 1 ký tự (chỉ ghi log, không gửi)\nconst exact = [], loose = [], near = [];\nconst have = {}; for (const c of chars) have[c] = (have[c] || 0) + 1;\nwords.forEach((w, i) => {\n  const ls = lettersOf(w);\n  if (ls.length === n) {\n    if (ls.slice().sort().join('') === key) exact.push([tierOf(i), w]);\n    else if ([...strip(ls.join(''))].sort().join('') === lkey) loose.push([tierOf(i), w]);\n  } else if (ls.length === n - 1) {\n    const cnt = {}; for (const c of ls) cnt[c] = (cnt[c] || 0) + 1;\n    if (Object.keys(cnt).every(c => (have[c] || 0) >= cnt[c])) near.push([tierOf(i), w]);\n  }\n});\nconst rank = a => a.sort((x, y) => x[0] - y[0] || (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0)).map(x => x[1]);\n\nlet mode = 'khớp đúng dấu', res = rank(exact);\nif (!res.length) { mode = 'khớp khi bỏ dấu'; res = rank(loose); }\nif (!res.length) {\n  print('Ký tự (' + n + '): ' + chars.join('/') + ' -> không có từ khớp đủ. Gợi ý thiếu 1 ký tự: ' + rank(near).slice(0, 10).join(' | '));\n  return;\n}\nprint('Ký tự (' + n + '): ' + chars.join('/') + ' -> ' + mode + ' ' + res.length + ' từ: ' + res.slice(0, 10).join(' | '));\nres.slice(0, MAX_SEND).forEach(w => reply(w));"
+    },
+    {
+      "id": "taixiu",
+      "name": "Tài xỉu (xu dùng chung)",
+      "enabled": true,
+      "language": "javascript",
+      "trigger": "!tx",
+      "matchType": "startsWith",
+      "replyMode": "reply",
+      "cooldown": 3,
+      "deleteAfter": 0,
+      "channels": "",
+      "fromIds": "",
+      "timeoutMs": 5000,
+      "code": "// !tx tai 100  |  !tx xiu 100  |  !tx (xem số xu)\nconst bal = shared.coins = shared.coins || {};\nconst uid = ctx.user.id;\nif (bal[uid] === undefined) bal[uid] = 1000;\nconst side = (ctx.args[0] || '').toLowerCase();\nconst bet = parseInt(ctx.args[1], 10);\nif (!['tai', 'xiu', 'tài', 'xỉu'].includes(side) || !(bet > 0)) {\n  reply(ctx.user.mention + ' bạn có **' + bal[uid] + '** xu.\\nCách chơi: !tx tai 100 hoặc !tx xiu 100');\n  return;\n}\nif (bet > bal[uid]) { reply(ctx.user.mention + ' không đủ xu (còn ' + bal[uid] + ').'); return; }\nconst d = [1, 2, 3].map(() => 1 + Math.floor(Math.random() * 6));\nconst sum = d[0] + d[1] + d[2];\nconst triple = d[0] === d[1] && d[1] === d[2];\nconst result = sum >= 11 ? 'tài' : 'xỉu';\nconst pick = side.startsWith('t') ? 'tài' : 'xỉu';\nconst win = !triple && pick === result;\nbal[uid] += win ? bet : -bet;\nreply('🎲 ' + d.join(' + ') + ' = **' + sum + '** → **' + (triple ? 'bão (nhà cái ăn)' : result) + '**\\n' +\n  ctx.user.mention + (win ? ' thắng +' : ' thua -') + bet + ' xu. Số dư: **' + bal[uid] + '**');"
+    },
+    {
+      "id": "noitu",
+      "name": "Nối từ (tiếng Việt, 2 tiếng)",
+      "enabled": true,
+      "language": "javascript",
+      "trigger": "!nt",
+      "matchType": "startsWith",
+      "replyMode": "reply",
+      "cooldown": 2,
+      "deleteAfter": 0,
+      "channels": "",
+      "fromIds": "",
+      "timeoutMs": 5000,
+      "code": "// !nt con mèo  ->  người sau gõ !nt mèo ăn ...\nconst word = ctx.rest.trim().toLowerCase().replace(/\\s+/g, ' ');\nconst syl = w => w.split(' ');\nstore.used = store.used || [];\nif (!word) {\n  reply(store.last ? 'Từ hiện tại: **' + store.last + '** → hãy nối bằng từ bắt đầu bằng **' + syl(store.last).at(-1) + '**' : 'Gõ !nt <từ gồm 2 tiếng> để bắt đầu.');\n  return;\n}\nif (syl(word).length !== 2) { reply('Từ phải gồm đúng 2 tiếng, vd: con mèo'); return; }\nif (store.used.includes(word)) { reply('Từ **' + word + '** đã dùng rồi!'); return; }\nif (store.last && syl(word)[0] !== syl(store.last).at(-1)) {\n  reply('Sai rồi! Từ phải bắt đầu bằng **' + syl(store.last).at(-1) + '**'); return;\n}\nstore.last = word; store.used.push(word);\nif (store.used.length > 500) store.used.shift();\nreply('✅ **' + word + '** → tiếp theo: từ bắt đầu bằng **' + syl(word)[1] + '**');"
     }
   ]
 }

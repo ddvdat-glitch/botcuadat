@@ -83,7 +83,159 @@ if (store.last && syl(word)[0] !== syl(store.last).at(-1)) {
 }
 store.last = word; store.used.push(word);
 if (store.used.length > 500) store.used.shift();
-reply('✅ **' + word + '** → tiếp theo: từ bắt đầu bằng **' + syl(word)[1] + '**');` }
+reply('✅ **' + word + '** → tiếp theo: từ bắt đầu bằng **' + syl(word)[1] + '**');` },
+  { id: 'nap_tu_dien', name: 'Nạp từ điển Viet*.txt (gửi link git)', language: 'javascript', trigger: String.raw`https?://(www\.)?(github\.com|raw\.githubusercontent\.com)/\S+`, matchType: 'regex', cooldown: 5, timeoutMs: 15000,
+    code: String.raw`// SCRIPT 1 - NẠP TỪ ĐIỂN: gửi link GitHub chứa các file Viet*.txt (Viet11K.txt, Viet22K.txt...) cho bot.
+// Bot tải về, gộp, nén và lưu vào data.json (shared.vtv_dict). Script 2 dùng dữ liệu này để đoán từ.
+// Link hỗ trợ: github.com/user/repo | .../tree/nhánh/thư-mục | .../blob/nhánh/file.txt | raw.githubusercontent.com/...
+const zlib = require('zlib');
+const ALLOWED_IDS = [];   // ID được phép nạp. Để trống = chỉ Admin / chủ server.
+if (!(ctx.user.isAdmin || ctx.user.isOwner || ALLOWED_IDS.includes(ctx.user.id))) return;
+
+const NAME_RE = /(^|\/)viet[^\/]*\.txt$/i;
+const KNOWN = ['Viet11K.txt', 'Viet22K.txt', 'Viet39K.txt', 'Viet74K.txt'];
+const UA = { 'User-Agent': 'discord-bot-nap-tu-dien' };
+const enc = p => p.split('/').map(encodeURIComponent).join('/');
+const rawUrl = (o, r, ref, p) => 'https://raw.githubusercontent.com/' + o + '/' + r + '/' + encodeURIComponent(ref) + '/' + enc(p);
+async function getJson(u) {
+  const r = await fetch(u, { headers: { ...UA, Accept: 'application/vnd.github+json' } });
+  if (!r.ok) throw new Error('GitHub trả về ' + r.status + ' cho ' + u);
+  return r.json();
+}
+async function exists(u) { try { return (await fetch(u, { method: 'HEAD', headers: UA })).ok; } catch { return false; } }
+async function getText(u) {
+  const r = await fetch(u, { headers: UA });
+  if (!r.ok) throw new Error('Tải lỗi ' + r.status + ': ' + u);
+  const t = await r.text();
+  if (t.length > 6000000) throw new Error('File quá lớn: ' + u);
+  return t.replace(/^\ufeff/, '');
+}
+
+try {
+  const urls = (ctx.content.match(/https?:\/\/[^\s<>)\]]+/g) || []).map(u => u.replace(/[.,;]+$/, ''));
+  const files = [];
+  for (const url of urls) {
+    let U; try { U = new URL(url); } catch { continue; }
+    const host = U.hostname.toLowerCase().replace(/^www\./, '');
+    const parts = U.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+    if (host === 'raw.githubusercontent.com') {
+      if (/\.txt$/i.test(U.pathname)) files.push({ name: parts[parts.length - 1], url });
+    } else if (host === 'github.com') {
+      const [o, r0, kind, ref, ...rest] = parts;
+      if (!o || !r0) continue;
+      const repo = r0.replace(/\.git$/i, '');
+      if ((kind === 'blob' || kind === 'raw') && ref && rest.length) {
+        files.push({ name: rest[rest.length - 1], url: rawUrl(o, repo, ref, rest.join('/')) });
+        continue;
+      }
+      const prefix = kind === 'tree' ? rest.join('/') : '';
+      try {
+        const branch = kind === 'tree' && ref ? ref : (await getJson('https://api.github.com/repos/' + o + '/' + repo)).default_branch;
+        const tree = await getJson('https://api.github.com/repos/' + o + '/' + repo + '/git/trees/' + encodeURIComponent(branch) + '?recursive=1');
+        for (const t of tree.tree || []) {
+          if (t.type === 'blob' && NAME_RE.test(t.path) && (!prefix || t.path.startsWith(prefix + '/')))
+            files.push({ name: t.path.split('/').pop(), url: rawUrl(o, repo, branch, t.path) });
+        }
+      } catch (e) {
+        // API GitHub bị giới hạn lượt gọi / lỗi -> thử tải thẳng các tên file quen thuộc ở nhánh main, master
+        print('GitHub API lỗi (' + e.message + ') -> thử tải thẳng ' + KNOWN.join(', '));
+        for (const br of [kind === 'tree' && ref ? ref : null, 'main', 'master'].filter(Boolean)) {
+          const hits = [];
+          for (const nm of KNOWN) {
+            const u = rawUrl(o, repo, br, (prefix ? prefix + '/' : '') + nm);
+            if (await exists(u)) hits.push({ name: nm, url: u });
+          }
+          if (hits.length) { files.push(...hits); break; }
+        }
+      }
+    }
+  }
+  const uniq = [...new Map(files.map(f => [f.url, f])).values()].slice(0, 8);
+  if (!uniq.length) { reply('❌ Không thấy file Viet*.txt nào trong link này.'); return; }
+
+  // Cách đọc từ giống doan_tu.py: NFC, thường, bỏ dòng trống / có số, gộp dấu cách + gạch nối
+  const parse = text => {
+    const set = new Set();
+    for (const line of text.split(/\r?\n/)) {
+      const w = line.normalize('NFC').trim().toLowerCase();
+      if (!w || /\d/.test(w)) continue;
+      set.add(w.replace(/[\s\-]+/g, ' '));
+    }
+    return [...set];
+  };
+  const loaded = await Promise.all(uniq.map(async f => ({ name: f.name, words: parse(await getText(f.url)) })));
+  loaded.sort((a, b) => a.words.length - b.words.length);   // file nhỏ = từ thông dụng hơn -> ưu tiên khi đoán
+
+  const seen = new Set(), all = [], bounds = [], info = [];
+  for (const f of loaded) {
+    let added = 0;
+    for (const w of f.words) if (!seen.has(w)) { seen.add(w); all.push(w); added++; }
+    bounds.push(all.length);
+    info.push({ name: f.name, words: f.words.length, added });
+  }
+  const C = zlib.constants;
+  const br = zlib.brotliCompressSync(Buffer.from(all.join('\n'), 'utf8'), { params: { [C.BROTLI_PARAM_QUALITY]: 11 } }).toString('base64');
+  if (br.length > 450000) { reply('❌ Dữ liệu sau nén quá lớn (' + Math.round(br.length / 1024) + ' KB), vượt giới hạn output của bot (512 KB).'); return; }
+
+  shared.vtv_dict = { v: 1, src: urls.join(' '), at: ctx.now, total: all.length, bounds, files: info, br };
+  print('Đã nạp ' + all.length + ' từ, nén ' + Math.round(br.length / 1024) + ' KB');
+  reply('✅ Đã nạp **' + all.length.toLocaleString('en-US') + '** từ vào data.json (~' + Math.round(br.length / 1024) + ' KB nén).\n' +
+    info.map(f => '• ' + f.name + ': ' + f.words + ' từ (mới ' + f.added + ')').join('\n'));
+} catch (e) {
+  reply('❌ Nạp từ điển lỗi: ' + (e && e.message ? e.message : e));
+}` },
+  { id: 'vua_tv', name: 'Vua Tiếng Việt - tự đoán từ', language: 'javascript', trigger: String.raw`Từ\s*cần\s*đoán`, matchType: 'regex', cooldown: 0, replyMode: 'send', timeoutMs: 8000, fromIds: '1248205177589334026',
+    code: String.raw`// SCRIPT 2 - VUA TIẾNG VIỆT (tự đoán): đọc tin của bot game, giải từ xáo chữ theo logic doan_tu.py rồi gửi đáp án vào kênh.
+// Chỉ nhận tin từ ID đã khai ở ô "Chỉ nhận tin từ ID" (cho phép cả bot). Cần nạp từ điển bằng Script 1 trước.
+// Mẫu tin: "Từ cần đoán: c/ò/n/l/n/h/h/ạ/g (gồm 9 ký tự)."
+const zlib = require('zlib');
+const MAX_SEND = 1;   // số đáp án gửi (xếp theo độ thông dụng). Nếu có nhiều từ cùng khớp, tăng lên 2-3 để thử thêm.
+
+const lines = String(ctx.content || '').normalize('NFC').split('\n');
+const li = lines.findIndex(l => /từ\s*cần\s*đoán/i.test(l));
+if (li < 0) return;
+const isL = c => /\p{L}/u.test(c);
+const take = l => l.replace(/^.*?từ\s*cần\s*đoán\s*[*_\x60~]*\s*[:：]?/i, '').split(/\(\s*gồm/i)[0];
+let chars = [...take(lines[li]).toLowerCase()].filter(isL);
+if (!chars.length && lines[li + 1]) chars = [...lines[li + 1].split(/\(\s*gồm/i)[0].toLowerCase()].filter(isL);
+const declared = +((lines[li].match(/gồm\s*(\d+)/i) || [])[1] || 0);
+if (!chars.length) { print('Không đọc được ký tự từ tin nhắn.'); return; }
+if (declared && declared !== chars.length) print('Cảnh báo: đề ghi ' + declared + ' ký tự nhưng đọc được ' + chars.length);
+
+const D = shared.vtv_dict;
+if (!D || !D.br) { print('Chưa có từ điển. Admin hãy gửi link git chứa Viet*.txt cho bot (Script 1).'); return; }
+const words = zlib.brotliDecompressSync(Buffer.from(D.br, 'base64')).toString('utf8').split('\n');
+const tierOf = i => { let t = 0; while (t < D.bounds.length - 1 && i >= D.bounds[t]) t++; return t; };
+
+const lettersOf = w => [...w].filter(isL);
+const strip = s => s.replace(/đ/g, 'd').replace(/Đ/g, 'D').normalize('NFD').replace(/\p{Mn}/gu, '').normalize('NFC');
+const n = chars.length;
+const key = chars.slice().sort().join('');
+const lkey = [...strip(chars.join(''))].sort().join('');
+
+// 1) khớp đúng dấu  2) khớp bỏ dấu  3) gợi ý thiếu 1 ký tự (chỉ ghi log, không gửi)
+const exact = [], loose = [], near = [];
+const have = {}; for (const c of chars) have[c] = (have[c] || 0) + 1;
+words.forEach((w, i) => {
+  const ls = lettersOf(w);
+  if (ls.length === n) {
+    if (ls.slice().sort().join('') === key) exact.push([tierOf(i), w]);
+    else if ([...strip(ls.join(''))].sort().join('') === lkey) loose.push([tierOf(i), w]);
+  } else if (ls.length === n - 1) {
+    const cnt = {}; for (const c of ls) cnt[c] = (cnt[c] || 0) + 1;
+    if (Object.keys(cnt).every(c => (have[c] || 0) >= cnt[c])) near.push([tierOf(i), w]);
+  }
+});
+const rank = a => a.sort((x, y) => x[0] - y[0] || (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0)).map(x => x[1]);
+
+let mode = 'khớp đúng dấu', res = rank(exact);
+if (!res.length) { mode = 'khớp khi bỏ dấu'; res = rank(loose); }
+if (!res.length) {
+  print('Ký tự (' + n + '): ' + chars.join('/') + ' -> không có từ khớp đủ. Gợi ý thiếu 1 ký tự: ' + rank(near).slice(0, 10).join(' | '));
+  return;
+}
+print('Ký tự (' + n + '): ' + chars.join('/') + ' -> ' + mode + ' ' + res.length + ' từ: ' + res.slice(0, 10).join(' | '));
+res.slice(0, MAX_SEND).forEach(w => reply(w));` }
 ];
 
 const merge = (def, cur) => {
@@ -94,7 +246,7 @@ const merge = (def, cur) => {
 };
 
 function seedScripts() {
-  return TEMPLATES.filter(t => ['taixiu', 'noitu'].includes(t.id)).map(t => cleanScript({ ...t, enabled: true }));
+  return TEMPLATES.filter(t => ['nap_tu_dien', 'vua_tv', 'taixiu', 'noitu'].includes(t.id)).sort((a, b) => ['nap_tu_dien', 'vua_tv', 'taixiu', 'noitu'].indexOf(a.id) - ['nap_tu_dien', 'vua_tv', 'taixiu', 'noitu'].indexOf(b.id)).map(t => cleanScript({ ...t, enabled: true }));
 }
 
 function cleanScript(s = {}) {
@@ -109,6 +261,7 @@ function cleanScript(s = {}) {
     cooldown: clampNum(s.cooldown, 0, 3600),
     deleteAfter: clampNum(s.deleteAfter, 0, 86400),
     channels: String(s.channels || ''),
+    fromIds: String(s.fromIds || ''),
     timeoutMs: clampNum(s.timeoutMs || 5000, 500, 15000),
     code: String(s.code || '').slice(0, 100000)
   };
@@ -420,11 +573,15 @@ function parseArgs(s, text) {
   return { rest, args: rest ? rest.split(/\s+/) : [], match };
 }
 
-function buildCtx(msg, pa) {
+// Nội dung để khớp lệnh: tin của người = content; tin của bot = content + chữ trong embed (bot game thường gửi embed)
+const textOf = msg => !msg.author.bot ? (msg.content || '') : [msg.content, ...(msg.embeds || []).flatMap(e => [e.title, e.description, ...(e.fields || []).flatMap(f => [f.name, f.value]), e.footer?.text])]
+  .filter(Boolean).join('\n').normalize('NFC');
+
+function buildCtx(msg, pa, text = msg.content) {
   const m = msg.member;
   const roles = m ? [...m.roles.cache.values()].filter(r => r.name !== '@everyone') : [];
   return {
-    content: msg.content, rest: pa.rest, args: pa.args, match: pa.match,
+    content: text, rest: pa.rest, args: pa.args, match: pa.match,
     user: {
       id: msg.author.id, username: msg.author.username, display: m?.displayName || msg.author.username, mention: `<@${msg.author.id}>`,
       roles: roles.map(r => r.name), roleIds: roles.map(r => r.id),
@@ -436,23 +593,26 @@ function buildCtx(msg, pa) {
 }
 
 async function handleScripts(msg) {
+  const text = textOf(msg);
   for (const s of db.scripts) {
-    if (s.enabled === false || !s.code || !s.trigger || !matchText(s, msg.content)) continue;
+    const from = String(s.fromIds || '').split(',').map(x => idFrom(x)).filter(Boolean);
+    if (from.length ? !from.includes(msg.author.id) : msg.author.bot) continue;   // có fromIds: chỉ nhận tin từ các ID đó (kể cả bot); không có: bỏ qua bot
+    if (s.enabled === false || !s.code || !s.trigger || !matchText(s, text)) continue;
     const allow = String(s.channels || '').split(',').map(x => x.trim()).filter(Boolean);
     if (allow.length && !allow.includes(msg.channel.id)) continue;
     const key = s.id + ':' + msg.author.id, last = cdMap.get(key) || 0;
     if (s.cooldown > 0 && Date.now() - last < s.cooldown * 1000) { msg.react('⏳').catch(() => {}); return true; }
     cdMap.set(key, Date.now());
-    log('cmd', `Script "${s.name}" (${s.language}) khớp "${msg.content.slice(0, 80)}"`, { user: msg.author.username, channel: chName(msg) });
-    enqueue(() => execScript(s, msg)).catch(e => log('error', `Script "${s.name}": ${e.message}`));
+    log('cmd', `Script "${s.name}" (${s.language}) khớp "${text.slice(0, 80)}"`, { user: msg.author.username, channel: chName(msg) });
+    enqueue(() => execScript(s, msg, text)).catch(e => log('error', `Script "${s.name}": ${e.message}`));
     return true;
   }
   return false;
 }
 
-async function execScript(s, msg) {
-  const pa = parseArgs(s, msg.content);
-  const ctx = buildCtx(msg, pa);
+async function execScript(s, msg, text = msg.content) {
+  const pa = parseArgs(s, text);
+  const ctx = buildCtx(msg, pa, text);
   const r = await runScript(s.language, s.code, { ctx, store: clone(db.scriptData.byScript[s.id]), shared: clone(db.scriptData.shared) }, s.timeoutMs);
   if (!r.ok) {
     log('error', `Script "${s.name}" lỗi (${r.ms}ms):\n${r.error}`, { user: msg.author.username, channel: chName(msg) });
@@ -513,7 +673,7 @@ client.on('messageCreate', async msg => {
     if (msg.author.id === client.user?.id) return;
     logChat(msg);
     rememberMember(msg);
-    if (msg.author.bot) return;
+    if (msg.author.bot) { await handleScripts(msg); return; }
     if (await handleScripts(msg)) return;
     await handleCommands(msg);
   } catch (e) { log('error', 'messageCreate: ' + (e.stack || e.message)); }
@@ -607,4 +767,4 @@ if (!process.env.BOT_TEST) {
   const bye = () => { try { saveNow(); } catch {} process.exit(0); };
   process.on('SIGINT', bye); process.on('SIGTERM', bye);
 }
-module.exports = { app, runAction, execAction, compareRank, render, normalize, parseArgs, db: () => db, setDb: d => { db = d; }, log, LOGS };
+module.exports = { handleScripts, textOf, app, runAction, execAction, compareRank, render, normalize, parseArgs, db: () => db, setDb: d => { db = d; }, log, LOGS };
