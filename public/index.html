@@ -22,10 +22,10 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}table.t td,table.t th
 .lr{white-space:pre-wrap;word-break:break-word;border-bottom:1px solid #1e1f22;padding:1px 0}
 .lt{display:inline-flex;align-items:center;gap:3px;margin:0;color:var(--tx);font-size:12px}
 .t-chat b{color:#b5bac1}.t-bot b{color:#5865f2}.t-cmd b{color:#c58af9}.t-action b{color:#f0b232}.t-script b{color:#2dc4b2}.t-error{color:#ff8a8a}.t-error b{color:#f23f43}.t-system b{color:#23a55a}
-details{margin:8px 0}summary{cursor:pointer;color:var(--mu)}
+select.pk{max-width:230px}details{margin:8px 0}summary{cursor:pointer;color:var(--mu)}
 </style></head><body><div class="w"><h1>🤖 Quản trị Bot Discord</h1><div id="app"></div></div>
 <script>
-let pw=sessionStorage.pw||'',D=null,tab='cmd',TPLS=[],LOGS=[],lastLog=0,logTimer=null,paused=false,RG='',SIM={a:'',b:'',type:'mute'};
+let pw=sessionStorage.pw||'',D=null,tab='cmd',TPLS=[],LOGS=[],lastLog=0,logTimer=null,paused=false,RG='',SIM={a:'',b:'',type:'mute'},SEND={ch:'',reply:'',replyInfo:''};
 const LF={chat:1,bot:1,cmd:1,action:1,script:1,error:1,system:1};
 const LN={chat:'CHAT',bot:'BOT',cmd:'LỆNH',action:'HÀNH ĐỘNG',script:'SCRIPT',error:'LỖI',system:'HỆ THỐNG'};
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
@@ -43,27 +43,47 @@ const N=(p,v)=>`<input type=number min=0 style="width:70px" value="${+v||0}" oni
 const SEC=(p,v)=>`<input type=number min=0 style="width:95px" value="${Math.floor(+v||0)}" oninput="S('${p}',Math.floor(+this.value||0));this.nextElementSibling.nextElementSibling.textContent=fmt(this.value)"><select onchange="if(this.value!=''){S('${p}',+this.value);draw()}"><option value="">chọn nhanh…</option>${PRESETS.map(([s,l])=>`<option value="${s}">${l}</option>`).join('')}</select><span class="mu">= ${fmt(v)}</span>`;
 const SR=(p,v,o)=>`<select onchange="S('${p}',this.value);draw()">${o.map(([a,b])=>`<option value="${a}" ${a==v?'selected':''}>${b}</option>`).join('')}</select>`;
 const PH=(h,t)=>h.replace('<input','<input placeholder="'+t+'"');
-const I=(p,v,c='')=>`<input class="${c}" value="${esc(v)}" oninput="S('${p}',this.value)">`;
+const I=(p,v,c='')=>`<input id="i_${p}" class="${c}" value="${esc(v)}" oninput="S('${p}',this.value)">`;
 const SEL=(p,v,opts)=>`<select onchange="S('${p}',this.value)">${opts.map(([a,b])=>`<option value="${a}" ${a==v?'selected':''}>${b}</option>`).join('')}</select>`;
 const TA=(p,arr)=>`<textarea oninput="S('${p}',this.value.split('\\n'))" placeholder="Mỗi dòng = 1 cách trả lời">${esc((arr||[]).join('\n'))}</textarea>`;
+// ---------- DANH SÁCH CHỌN SẴN (user / role / kênh / server) ----------
+const gname=(id)=>(Object.keys(D.roles||{}).length>1?'['+((D.roles[id]||D.channels?.[id]||{}).name||id)+'] ':'');
+function optsFor(kind){
+ const o=[];
+ if(kind=='user'||kind=='username'){for(const [g,ms] of Object.entries(D.members||{}))Object.entries(ms).sort((a,b)=>(b[1].t||0)-(a[1].t||0)).forEach(([id,m])=>
+   o.push([kind=='user'?id:m.username,gname(g)+(m.display||m.username)+' (@'+m.username+')'+(m.bot?' 🤖':'')+(m.role&&m.role!='@everyone'?' · '+m.role:'')+(kind=='user'?' — '+id:'')]))}
+ else if(kind=='role'||kind=='roleName'){for(const [g,x] of Object.entries(D.roles||{}))x.roles.filter(r=>r.name!='@everyone').forEach(r=>o.push([kind=='role'?r.id:r.name,gname(g)+r.name+(kind=='role'?' — '+r.id:'')]))}
+ else if(kind=='channel'){for(const [g,x] of Object.entries(D.channels||{}))x.channels.forEach(c=>o.push([c.id,gname(g)+'#'+c.name+(c.parent?' ('+c.parent+')':'')+(kind=='channel'?' — '+c.id:'')]))}
+ else if(kind=='guild'){for(const [g,x] of Object.entries(D.roles||{}))o.push([g,x.name+' — '+g])}
+ return o}
+const KIND={userId:'user',username:'username',mentionId:'user',roleId:'role',roleName:'roleName',channelId:'channel',guildId:'guild'};
+const KIND_VN={user:'người dùng',username:'người dùng',role:'role',roleName:'role',channel:'kênh',guild:'server'};
+// PK = ô chọn từ danh sách, chọn xong tự điền vào ô nhập có đường dẫn p (mode: append = thêm vào, ngăn bằng dấu phẩy; set = thay)
+const PK=(kind,p,mode='set')=>{const o=optsFor(kind);
+ return `<select class="pk" title="Chọn từ danh sách" onchange="pick('${p}',this,'${mode}')"><option value="">📋 chọn ${KIND_VN[kind]}${o.length?'':' (chưa có dữ liệu)'}…</option>${o.map(([v,l])=>`<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select>`};
+function pick(p,sel,mode){const v=sel.value;sel.value='';if(!v)return;const inp=document.getElementById('i_'+p);if(!inp)return;let cur=inp.value;
+ if(mode=='append'){const a=cur.split(',').map(x=>x.trim()).filter(Boolean);if(!a.includes(v))a.push(v);cur=a.join(',')}else cur=v;
+ inp.value=cur;S(p,cur)}
+async function refreshLists(){const m=document.getElementById('rl');if(m)m.textContent='⏳ đang quét...';
+ try{const r=await api('POST',{},'/api/scan');D.roles=r.roles;D.channels=r.channels;D.members=r.members;draw()}catch(e){if(m)m.textContent='❌ '+e.message}}
 const MEMBER_ACT=['mute','unmute','kick','ban','unban','addRole','removeRole'];
 const ACT=(p,a)=>{const t=a.type,mem=MEMBER_ACT.includes(t);
  return `<div class="r" style="background:#1e1f22;padding:6px;border-radius:6px"><span class="mu">⚡ Hành động thêm:</span>${SR(p+'.type',t,[['none','Không'],['mute','Mute (timeout)'],['unmute','Bỏ mute'],['kick','Kick'],['ban','Ban'],['unban','Unban'],['deleteMsg','Xóa tin nhắn người gõ'],['addRole','Thêm role'],['removeRole','Gỡ role']])}
 ${mem?SR(p+'.target',a.target,[['sender','lên người gõ tin'],['mention','lên người được @tag trong tin'],['id','lên ID tùy chỉnh']]):''}
-${mem&&a.target=='id'?PH(I(p+'.targetId',a.targetId),'ID người dùng'):''}
+${mem&&a.target=='id'?PH(I(p+'.targetId',a.targetId),'ID người dùng')+PK('user',p+'.targetId'):''}
 ${t=='mute'||t=='ban'?`<span class="mu">${t=='ban'?'ban trong (0 = vĩnh viễn):':'mute trong:'}</span>${SEC(p+'.seconds',a.seconds)}`:''}
 ${t!='none'&&t!='deleteMsg'?`<span class="mu">chờ trước khi làm:</span>${SEC(p+'.delay',a.delay)}`:''}
-${t=='addRole'||t=='removeRole'?PH(I(p+'.roleId',a.roleId),'ID role'):''}
+${t=='addRole'||t=='removeRole'?PH(I(p+'.roleId',a.roleId),'ID role')+PK('role',p+'.roleId'):''}
 ${['mute','kick','ban'].includes(t)?PH(I(p+'.reason',a.reason),'Lý do (tùy chọn)'):''}</div>
-${['mute','kick','ban'].includes(t)&&a.target!='sender'?'<div class="mu">⚖️ Khi nhắm vào người khác, bot so sánh cấp role người gõ với đối tượng theo tab "Role & phân cấp".</div>':''}`};
+${['mute','kick','ban'].includes(t)&&a.target!='sender'?'<div class="mu">⚖️ Khi nhắm vào người khác, bot kiểm tra người gõ có QUYỀN (role) tương ứng, rồi so sánh cấp role với đối tượng — cấu hình ở tab "Role & phân cấp".</div>':''}`};
 function add(p,v){let o=D;p.split('.').forEach(k=>o=o[k]);o.push(v);draw()}
 function del(p,i){let o=D;p.split('.').forEach(k=>o=o[k]);o.splice(i,1);draw()}
 const newAct=()=>({type:'none',target:'sender',seconds:60,delay:0});
 const newCmd=()=>({trigger:'',matchType:'contains',enabled:true,pick:'random',replyMode:'reply',deleteAfter:0,rules:[],defaultReplies:['Xin chào {user}!']});
 const newRule=()=>({conditions:[{type:'userId',op:'is',value:''}],replies:[''],deleteAfter:0});
-const newScript=()=>({id:'s'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),name:'Script mới',enabled:true,language:'python',trigger:'!lenh',matchType:'startsWith',replyMode:'reply',cooldown:0,deleteAfter:0,channels:'',timeoutMs:5000,code:"reply(f\"Xin chào {ctx['user']['mention']}!\")"});
-async function pull(){const n=await api('GET');D.roles=n.roles;D.scriptData=n.scriptData;D.runtimes=n.runtimes}
-async function go(t){tab=t;stopLog();if(t=='script'||t=='role'){try{await pull()}catch{}}draw();if(t=='log')startLog()}
+const newScript=()=>{const py=D.runtimes?.python?.ok;return {id:'s'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),name:'Script mới',enabled:true,language:py?'python':'javascript',trigger:'!lenh',matchType:'startsWith',replyMode:'reply',cooldown:0,deleteAfter:0,channels:'',timeoutMs:5000,code:py?"reply(f\"Xin chào {ctx['user']['mention']}!\")":"reply('Xin chào ' + ctx.user.mention + '!');"}};
+async function pull(){const n=await api('GET');D.roles=n.roles;D.channels=n.channels;D.members=n.members;D.scriptData=n.scriptData;D.runtimes=n.runtimes}
+async function go(t){tab=t;stopLog();if(t!='log'){try{await pull()}catch{}}draw();if(t=='log')startLog()}
 const TABS=[['cmd','Lệnh'],['tag','Thẻ'],['script','Script (Python/JS)'],['role','Role & phân cấp'],['log','Log']];
 function draw(){
  D.commands.forEach(c=>{c.defaultAction??=newAct();(c.rules||[]).forEach(q=>q.action??=newAct())});
@@ -73,7 +93,8 @@ function draw(){
  app.innerHTML=h;if(tab=='log')renderLogs(true)}
 // ---------------- LỆNH ----------------
 function drawCmd(){
- let h=`<div class="mu">Biến có sẵn: {user} (tag người nhắn), {userId}, {username}, {roles}, {server}, {channel}, {seconds}/{duration} (thời gian mute/ban của lệnh) + các thẻ tùy chỉnh. Quy tắc chạy từ trên xuống, quy tắc đầu tiên khớp hết điều kiện sẽ được dùng; không khớp thì dùng "Trả lời mặc định".</div>`;
+ let h=`<div class="r"><button class="s" onclick="refreshLists()">🔄 Làm mới danh sách (role / kênh / thành viên)</button><span id=rl class="mu">${Object.keys(D.members||{}).reduce((n,g)=>n+Object.keys(D.members[g]).length,0)} người · ${Object.values(D.roles||{}).reduce((n,g)=>n+g.roles.length,0)} role · ${Object.values(D.channels||{}).reduce((n,g)=>n+g.channels.length,0)} kênh — các ô nhập ID đều có nút "📋 chọn…" để khỏi gõ tay</span></div>
+ <div class="mu">Biến có sẵn: {user} (tag người nhắn), {userId}, {username}, {roles}, {server}, {channel}, {seconds}/{duration} (thời gian mute/ban của lệnh) + các thẻ tùy chỉnh. Quy tắc chạy từ trên xuống, quy tắc đầu tiên khớp hết điều kiện sẽ được dùng; không khớp thì dùng "Trả lời mặc định".</div>`;
  D.commands.forEach((c,i)=>{const P=`commands.${i}`;
   h+=`<div class="card"><div class="r">${I(P+'.trigger',c.trigger)}
    ${SEL(P+'.matchType',c.matchType,[['contains','Chứa'],['exact','Đúng hệt'],['startsWith','Bắt đầu bằng'],['regex','Regex']])}
@@ -84,8 +105,8 @@ function drawCmd(){
    <button class="d" onclick="del('commands',${i})">Xóa lệnh</button></div>`;
   (c.rules||[]).forEach((r,j)=>{const R=`${P}.rules.${j}`;
    h+=`<div class="rule"><b>Nếu</b> (tất cả điều kiện đúng):`;
-   r.conditions.forEach((cd,k)=>h+=`<div class="r">${SEL(`${R}.conditions.${k}.type`,cd.type,[['userId','ID người dùng'],['username','Tên người dùng'],['mentionId','ID người được @tag trong tin'],['roleId','ID role'],['roleName','Tên role'],['channelId','ID kênh'],['guildId','ID server']])}
-     ${SEL(`${R}.conditions.${k}.op`,cd.op,[['is','là'],['not','KHÔNG là']])}${I(`${R}.conditions.${k}.value`,cd.value,'f')}<button class="d" onclick="del('${R}.conditions',${k})">x</button></div>`);
+   r.conditions.forEach((cd,k)=>h+=`<div class="r">${SR(`${R}.conditions.${k}.type`,cd.type,[['userId','ID người dùng'],['username','Tên người dùng'],['mentionId','ID người được @tag trong tin'],['roleId','ID role'],['roleName','Tên role'],['channelId','ID kênh'],['guildId','ID server']])}
+     ${SEL(`${R}.conditions.${k}.op`,cd.op,[['is','là'],['not','KHÔNG là']])}${I(`${R}.conditions.${k}.value`,cd.value,'f')}${PK(KIND[cd.type]||'user',`${R}.conditions.${k}.value`,'append')}<button class="d" onclick="del('${R}.conditions',${k})">x</button></div>`);
    h+=`<button class="s" onclick="add('${R}.conditions',{type:'userId',op:'is',value:''})">+ điều kiện</button> <span class="mu">nhiều giá trị ngăn bằng dấu phẩy = một trong số đó</span>
     <label>Trả lời (mỗi dòng 1 cách):</label>${TA(R+'.replies',r.replies)}${ACT(R+'.action',r.action)}
     <div class="r"><span class="mu">Tự xóa sau (giây, 0 = theo lệnh):</span>${N(R+'.deleteAfter',r.deleteAfter)}</div>
@@ -96,20 +117,20 @@ function drawCmd(){
 // ---------------- THẺ ----------------
 function drawTag(){
  let h=`<div class="mu">Dùng trong câu trả lời bằng <b>{tên_thẻ}</b>. Loại "mention" = tag người theo ID, "video/text" = chèn link hoặc chữ.</div>`;
- D.tags.forEach((t,i)=>h+=`<div class="card r">${I(`tags.${i}.name`,t.name)}<select onchange="S('tags.${i}.type',this.value);draw()">${[['mention','Tag người (ID)'],['video','Link video'],['link','Link có tên (bấm vào chữ)'],['text','Văn bản']].map(([a,b])=>`<option value="${a}" ${a==t.type?'selected':''}>${b}</option>`).join('')}</select>${PH(I(`tags.${i}.value`,t.value,'f'),'ID / link / văn bản')}${t.type=='link'?PH(I(`tags.${i}.label`,t.label),'Chữ hiển thị, vd: xuân thu tất thành')+B(`tags.${i}.hide`,t.hide,'Ẩn preview video','Hiện preview video'):''}<button class="d" onclick="del('tags',${i})">Xóa</button></div>`);
+ D.tags.forEach((t,i)=>h+=`<div class="card r">${I(`tags.${i}.name`,t.name)}<select onchange="S('tags.${i}.type',this.value);draw()">${[['mention','Tag người (ID)'],['video','Link video'],['link','Link có tên (bấm vào chữ)'],['text','Văn bản']].map(([a,b])=>`<option value="${a}" ${a==t.type?'selected':''}>${b}</option>`).join('')}</select>${PH(I(`tags.${i}.value`,t.value,'f'),'ID / link / văn bản')}${t.type=='mention'?PK('user',`tags.${i}.value`):''}${t.type=='link'?PH(I(`tags.${i}.label`,t.label),'Chữ hiển thị, vd: xuân thu tất thành')+B(`tags.${i}.hide`,t.hide,'Ẩn preview video','Hiện preview video'):''}<button class="d" onclick="del('tags',${i})">Xóa</button></div>`);
  return h+`<button onclick="add('tags',{name:'',type:'video',value:''})">+ Thêm thẻ</button>`}
 // ---------------- SCRIPT ----------------
 function rtOpts(){const rt=D.runtimes||{};return Object.entries(rt).map(([k,v])=>[k,v.label+(v.ok?' ✅':' ❌ chưa cài')])}
 function drawScript(){
  const rt=D.runtimes||{};
- let h=`<div class="mu">Viết thuật toán bằng ngôn ngữ lập trình để xử lý lệnh (tài xỉu, nối từ, đoán số, shop...). Script chạy trong tiến trình riêng (giới hạn thời gian), dữ liệu lưu chung vào <b>data.json</b>. Script được kiểm tra trước các "Lệnh" thường: script nào khớp trước sẽ chạy rồi dừng.
+ let h=`<div class="mu">Viết thuật toán bằng ngôn ngữ lập trình để xử lý lệnh (tài xỉu, nối từ, đoán số, shop...). Script chạy trong tiến trình riêng (giới hạn thời gian), <b>code script và dữ liệu đều lưu trong data.json</b> (không cần file script riêng). Script được kiểm tra trước các "Lệnh" thường: script nào khớp trước sẽ chạy rồi dừng.
  Môi trường: ${Object.entries(rt).map(([k,v])=>`<b>${v.label}</b> ${v.ok?'<span class=ok>✅ '+esc(v.version)+'</span>':'<span class=bad>❌ chưa cài</span>'}`).join(' · ')}</div>
  <details><summary>📖 Cách viết script (bấm để mở)</summary><div class="card mu" style="line-height:1.6">
  <b>Biến có sẵn</b>: <code>ctx</code> (tin nhắn), <code>store</code> (dữ liệu riêng của script này), <code>shared</code> (dữ liệu dùng chung mọi script) — sửa trực tiếp, bot tự lưu vào data.json.<br>
  <code>ctx.content</code>, <code>ctx.rest</code> (phần sau lệnh), <code>ctx.args</code> (list các từ), <code>ctx.match</code> (nhóm regex), <code>ctx.user.id/username/display/mention/roles/roleIds/isAdmin/isOwner</code>, <code>ctx.mentions[]</code> (id, username, mention), <code>ctx.channelId</code>, <code>ctx.guildId</code>.<br>
  <b>Hàm</b> (Python dùng snake_case, JS dùng camelCase): <code>reply(text)</code>, <code>mute(target, giây, lý do)</code>, <code>ban(target, giây, lý do)</code> (0 = vĩnh viễn), <code>kick(target, lý do)</code>, <code>unmute(target)</code>, <code>unban(target)</code>, <code>add_role / addRole(target, roleId)</code>, <code>remove_role / removeRole</code>, <code>delete_msg / deleteMsg()</code>, <code>react(emoji)</code>.<br>
  <code>target</code> là <code>'sender'</code> (người gõ) hoặc ID / mention của người khác. Mute/ban/kick người khác vẫn phải qua kiểm tra phân cấp role.<br>
- Python: <code>print()</code> hiện trong tab Log. JavaScript: dùng được <code>await</code>, <code>return</code>. Lỗi hiện ở tab Log (tin nhắn gốc được thả ⚠️).</div></details>`;
+ Python: <code>print()</code> hiện trong tab Log. JavaScript: dùng được <code>await</code>; <code>return 'chữ'</code> = bot trả lời chữ đó. Lỗi hiện ở tab Log (tin nhắn gốc được thả ⚠️).</div></details>`;
  (D.scripts||[]).forEach((s,i)=>{const P=`scripts.${i}`,sd=D.scriptData?.byScript?.[s.id]||{};
   h+=`<div class="card"><div class="r">${PH(I(P+'.name',s.name),'Tên script')}${B(P+'.enabled',s.enabled!==false,'Bật','Tắt')}${SEL(P+'.language',s.language,rtOpts())}
    <select onchange="applyTpl(${i},this.value)"><option value="">📚 Chèn mẫu…</option>${TPLS.map(t=>`<option value="${t.id}">${esc(t.name)} (${t.language})</option>`).join('')}</select>
@@ -119,7 +140,7 @@ function drawScript(){
    <span class="mu">Chờ giữa 2 lần/người (giây):</span>${N(P+'.cooldown',s.cooldown)}
    <span class="mu">Tự xóa trả lời sau (giây):</span>${N(P+'.deleteAfter',s.deleteAfter)}
    <span class="mu">Giới hạn chạy (ms):</span><input type=number style="width:80px" min=500 max=15000 value="${+s.timeoutMs||5000}" oninput="S('${P}.timeoutMs',+this.value)"></div>
-   <div class="r"><span class="mu">Chỉ chạy ở kênh (ID, cách nhau dấu phẩy, trống = mọi kênh):</span>${PH(I(P+'.channels',s.channels,'f'),'ID kênh')}</div>
+   <div class="r"><span class="mu">Chỉ chạy ở kênh (ID, cách nhau dấu phẩy, trống = mọi kênh):</span>${PH(I(P+'.channels',s.channels,'f'),'ID kênh')}${PK('channel',P+'.channels','append')}</div>
    <textarea class="code" spellcheck="false" oninput="S('${P}.code',this.value)" onkeydown="if(event.key=='Tab'){event.preventDefault();this.setRangeText('    ',this.selectionStart,this.selectionEnd,'end');S('${P}.code',this.value)}">${esc(s.code)}</textarea>
    <div class="r"><input id="tt_${s.id}" style="flex:1;min-width:200px" placeholder="Tin nhắn thử, vd: ${esc(s.trigger)} tai 100" value="${esc(s.trigger)} ">
     <label class="lt"><input type=checkbox id="tp_${s.id}"> ghi dữ liệu</label><button class="g" onclick="testScript(${i})">▶ Chạy thử</button></div>
@@ -185,12 +206,26 @@ function drawRole(){
    ${PH(I(P+'.reply',v.reply),'Tin bot gửi')}
    <span class="mu">+ làm thêm:</span>${SR(P+'.punish.type',v.punish.type,PUN)}${['mute','ban'].includes(v.punish.type)?SEC(P+'.punish.seconds',v.punish.seconds):''}
    <span class="mu">xóa tin sau (giây):</span>${N(P+'.deleteAfter',v.deleteAfter)}</div>`});h+='</div>'});
- h+=`<div class="rule"><b>Bot không đủ cấp / quyền</b> <span class="mu">(role bot thấp hơn hoặc bằng đối tượng, đối tượng là Admin/chủ server, hoặc bot thiếu quyền)</span>
+ const RP=H.requirePerm;
+ h+=`<div class="rule"><b>🔑 Kiểm tra QUYỀN của người gõ</b> ${B('settings.hierarchy.requirePerm.enabled',RP.enabled,'Bật','Tắt')}
+  <div class="mu">Khi một lệnh/script mute·unmute (cần quyền Timeout), kick (Kick), ban·unban (Ban), thêm/gỡ role (Quản lý role) lên <b>người khác</b>, người gõ phải có quyền đó trong role của mình (hoặc là Admin / chủ server). Tự phạt chính mình thì bỏ qua. Biến: {user} {target} {action} {perm}.</div>
+  <div class="r">${PH(I('settings.hierarchy.requirePerm.reply',RP.reply,'f'),'Tin bot gửi khi không đủ quyền')}<span class="mu">xóa tin sau (giây):</span>${N('settings.hierarchy.requirePerm.deleteAfter',RP.deleteAfter)}</div></div>
+ <div class="rule"><b>Bot không đủ cấp / quyền</b> <span class="mu">(role bot thấp hơn hoặc bằng đối tượng, đối tượng là Admin/chủ server, hoặc bot thiếu quyền)</span>
   <div class="r">${PH(I('settings.hierarchy.botCannot.reply',H.botCannot.reply,'f'),'Tin bot gửi')}<span class="mu">xóa tin sau (giây):</span>${N('settings.hierarchy.botCannot.deleteAfter',H.botCannot.deleteAfter)}</div></div></div>`;
  return h}
-async function rescan(){sc.textContent='⏳ đang quét...';try{const r=await api('POST',{},'/api/scan');D.roles=r.roles;draw()}catch(e){sc.textContent='❌ '+e.message}}
+async function rescan(){sc.textContent='⏳ đang quét...';try{const r=await api('POST',{},'/api/scan');D.roles=r.roles;D.channels=r.channels;D.members=r.members;draw()}catch(e){sc.textContent='❌ '+e.message}}
 // ---------------- LOG ----------------
-function drawLog(){return `<div class="r">${Object.keys(LF).map(k=>`<label class="lt t-${k}"><input type=checkbox ${LF[k]?'checked':''} onchange="LF['${k}']=this.checked?1:0;renderLogs()"><b>${LN[k]}</b></label>`).join(' ')}
+function sendBox(){const gs=Object.entries(D.channels||{});if(!SEND.ch&&gs.length&&gs[0][1].channels.length)SEND.ch=gs[0][1].channels[0].id;
+ return `<div class="card"><b>💬 Nhắn bằng bot</b> <span class="mu">(hỗ trợ {tên_thẻ}; tag người bằng &lt;@ID&gt; hoặc chọn bên dưới; Enter để gửi)</span>
+ <div class="r"><select id=sch onchange="SEND.ch=this.value">${gs.map(([g,x])=>`<optgroup label="${esc(x.name)}">${x.channels.map(c=>`<option value="${c.id}" ${c.id==SEND.ch?'selected':''}>#${esc(c.name)}</option>`).join('')}</optgroup>`).join('')||'<option value="">(chưa có kênh — bấm Quét ở tab Lệnh/Role)</option>'}</select>
+  <select class="pk" onchange="insMention(this)"><option value="">👤 chèn @tag…</option>${optsFor('user').map(([v,l])=>`<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select></div>
+ <div class="r"><input id=smsg style="flex:1;min-width:220px" placeholder="Nội dung tin nhắn..." onkeydown="if(event.key=='Enter'&&!event.shiftKey){event.preventDefault();sendMsg()}"><button class="g" onclick="sendMsg()">Gửi</button></div>
+ <div class="r"><span id=rpi class="mu">${SEND.reply?'↩ đang trả lời: '+esc(SEND.replyInfo)+' <a href="#" onclick="SEND.reply=\'\';SEND.replyInfo=\'\';draw();return false">[hủy]</a>':''}</span><span id=sres class="mu"></span></div></div>`}
+function insMention(sel){const v=sel.value;sel.value='';if(!v)return;const m=document.getElementById('smsg');m.setRangeText('<@'+v+'> ',m.selectionStart,m.selectionEnd,'end');m.focus()}
+async function sendMsg(){const m=document.getElementById('smsg'),r=document.getElementById('sres');if(!SEND.ch||!m.value.trim()){r.textContent='Chọn kênh và nhập nội dung';r.className='mu bad';return}
+ try{await api('POST',{channelId:SEND.ch,content:m.value,replyTo:SEND.reply||undefined},'/api/send');m.value='';SEND.reply='';SEND.replyInfo='';r.textContent='✅ đã gửi';r.className='mu ok';const i=document.getElementById('rpi');if(i)i.textContent='';pollLogs()}catch(e){r.textContent='❌ '+e.message;r.className='mu bad'}}
+function replyLog(id){const e=LOGS.find(x=>x.id==id);if(!e)return;SEND.ch=e.channelId||SEND.ch;SEND.reply=e.msgId||'';SEND.replyInfo=(e.user||'')+': '+String(e.text).slice(0,60);draw();const m=document.getElementById('smsg');if(m)m.focus()}
+function drawLog(){return sendBox()+`<div class="r">${Object.keys(LF).map(k=>`<label class="lt t-${k}"><input type=checkbox ${LF[k]?'checked':''} onchange="LF['${k}']=this.checked?1:0;renderLogs()"><b>${LN[k]}</b></label>`).join(' ')}
  <input id=lq placeholder="Tìm trong log..." oninput="renderLogs()" style="width:170px">
  <button class="s" id=pb onclick="togglePause()">${paused?'▶ Tiếp tục':'⏸ Tạm dừng'}</button><button class="s" onclick="renderLogs(true)">⏬ Xuống cuối</button><button class="s" onclick="dlLogs()">⬇ Tải .txt</button><button class="d" onclick="clrLogs()">🗑 Xóa</button><span id=lc class="mu"></span></div>
  <div id=lg class="lg"></div><div class="mu">Log lưu trong RAM (tối đa 1500 dòng gần nhất), mất khi bot khởi động lại. Chat hiển thị gồm cả tin của các bot khác.</div>`}
@@ -199,7 +234,7 @@ function logRows(){const q=(document.getElementById('lq')?.value||'').toLowerCas
  return LOGS.filter(e=>LF[e.type]&&(!q||(e.text+' '+(e.user||'')+' '+(e.channel||'')).toLowerCase().includes(q)))}
 function renderLogs(force){const el=document.getElementById('lg');if(!el)return;const rows=logRows(),show=rows.slice(-700);
  const atBottom=el.scrollHeight-el.scrollTop-el.clientHeight<40;
- el.innerHTML=show.map(e=>`<div class="lr t-${e.type}"><span class="mu">${tm(e.t)}</span> <b>${LN[e.type]||e.type}</b> ${e.channel?'<span class="mu">#'+esc(e.channel)+'</span> ':''}${e.user?'<b>'+esc(e.user)+'</b>: ':''}${esc(e.text)}</div>`).join('')||'<span class="mu">Chưa có log.</span>';
+ el.innerHTML=show.map(e=>`<div class="lr t-${e.type}"><span class="mu">${tm(e.t)}</span> <b>${LN[e.type]||e.type}</b> ${e.channel?'<span class="mu">#'+esc(e.channel)+'</span> ':''}${e.user?'<b>'+esc(e.user)+'</b>: ':''}${esc(e.text)}${e.type=='chat'&&e.msgId?` <a href="#" title="Trả lời tin này bằng bot" onclick="replyLog(${e.id});return false" style="text-decoration:none">↩</a>`:''}</div>`).join('')||'<span class="mu">Chưa có log.</span>';
  if(atBottom||force)el.scrollTop=el.scrollHeight;
  const lc=document.getElementById('lc');if(lc)lc.textContent=`${rows.length}/${LOGS.length} dòng`}
 async function pollLogs(){if(paused)return;try{const r=await api('GET',null,'/api/logs?after='+lastLog);

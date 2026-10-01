@@ -1,21 +1,103 @@
 // Chạy script người dùng viết (Python / JavaScript) trong tiến trình con riêng:
+// - code script nằm trong data.json (KHÔNG cần file .js/.py riêng)
+// - phần "chạy script" (runner) được nhúng sẵn trong file này, truyền qua tham số node -e / python -c
 // - có giới hạn thời gian, giới hạn dung lượng output
 // - môi trường (env) được lọc sạch, KHÔNG có token / secret
 const { spawn, spawnSync } = require('child_process');
-const path = require('path');
 const os = require('os');
 
 const MARK = '@@RESULT@@';
 const MAX_OUT = 512 * 1024;
 
+// ---------- Runner JavaScript (hàm này được chuyển thành chuỗi rồi chạy bằng `node -e`) ----------
+function jsRunner() {
+  const MARK = '@@RESULT@@';
+  const chunks = [];
+  process.stdin.on('data', d => chunks.push(d));
+  process.stdin.on('end', async () => {
+    let inp;
+    try { inp = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+    catch { console.error('Dữ liệu đầu vào không hợp lệ'); process.exit(2); }
+
+    const out = { replies: [], reactions: [], actions: [], delete: false };
+    const ctx = inp.ctx || {}, store = inp.store || {}, shared = inp.shared || {};
+    const show = a => typeof a === 'string' ? a : (() => { try { return JSON.stringify(a); } catch { return String(a); } })();
+    const print = (...a) => process.stdout.write(a.map(show).join(' ') + '\n');
+    const act = (type, target, extra) => out.actions.push({ type, target: target == null ? 'sender' : String(target), ...extra });
+
+    const api = {
+      ctx, store, shared, print, require,
+      reply: (...t) => { out.replies.push(t.map(String).join(' ')); },
+      mute: (t, seconds, reason) => act('mute', t, { seconds, reason }),
+      unmute: (t, reason) => act('unmute', t, { reason }),
+      ban: (t, seconds, reason) => act('ban', t, { seconds, reason }),
+      unban: (t, reason) => act('unban', t, { reason }),
+      kick: (t, reason) => act('kick', t, { reason }),
+      addRole: (t, roleId) => act('addRole', t, { roleId }),
+      removeRole: (t, roleId) => act('removeRole', t, { roleId }),
+      deleteMsg: () => { out.delete = true; },
+      react: e => { out.reactions.push(String(e)); }
+    };
+    api.add_role = api.addRole; api.remove_role = api.removeRole; api.delete_msg = api.deleteMsg;
+
+    try {
+      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+      const fn = new AsyncFunction(...Object.keys(api), String(inp.code || ''));
+      const ret = await fn(...Object.values(api));
+      if (typeof ret === 'string' && ret.trim()) out.replies.push(ret);
+    } catch (e) { console.error((e && e.stack) || String(e)); process.exit(1); }
+
+    process.stdout.write('\n' + MARK + JSON.stringify({ out, store, shared }), () => process.exit(0));
+  });
+}
+const JS_RUNNER = '(' + jsRunner.toString() + ')()';
+
+// ---------- Runner Python (chạy bằng `python -c`) ----------
+const PY_RUNNER = String.raw`
+import sys, json, traceback
+MARK = '@@RESULT@@'
+inp = json.loads(sys.stdin.read() or '{}')
+out = {'replies': [], 'reactions': [], 'actions': [], 'delete': False}
+ctx = inp.get('ctx') or {}
+store = inp.get('store') or {}
+shared = inp.get('shared') or {}
+
+def reply(*t): out['replies'].append(' '.join(str(x) for x in t))
+def _act(type_, target='sender', **kw):
+    d = {'type': type_, 'target': 'sender' if target is None else str(target)}; d.update(kw); out['actions'].append(d)
+def mute(target='sender', seconds=60, reason=''): _act('mute', target, seconds=seconds, reason=reason)
+def unmute(target='sender', reason=''): _act('unmute', target, reason=reason)
+def ban(target='sender', seconds=0, reason=''): _act('ban', target, seconds=seconds, reason=reason)
+def unban(target='sender', reason=''): _act('unban', target, reason=reason)
+def kick(target='sender', reason=''): _act('kick', target, reason=reason)
+def add_role(target, role_id): _act('addRole', target, roleId=role_id)
+def remove_role(target, role_id): _act('removeRole', target, roleId=role_id)
+def delete_msg(): out['delete'] = True
+def react(emoji): out['reactions'].append(str(emoji))
+addRole, removeRole, deleteMsg = add_role, remove_role, delete_msg
+
+env = {'__name__': '__main__', 'ctx': ctx, 'store': store, 'shared': shared, 'reply': reply, 'mute': mute,
+       'unmute': unmute, 'ban': ban, 'unban': unban, 'kick': kick, 'add_role': add_role, 'remove_role': remove_role,
+       'addRole': addRole, 'removeRole': removeRole, 'delete_msg': delete_msg, 'deleteMsg': deleteMsg, 'react': react}
+try:
+    exec(compile(inp.get('code') or '', '<script>', 'exec'), env)
+except SystemExit:
+    pass
+except BaseException:
+    traceback.print_exc(); sys.exit(1)
+if isinstance(env.get('store'), dict): store = env['store']
+if isinstance(env.get('shared'), dict): shared = env['shared']
+sys.stdout.write('\n' + MARK + json.dumps({'out': out, 'store': store, 'shared': shared}, ensure_ascii=False, default=str))
+sys.stdout.flush()
+`;
+
 const RUNTIMES = {
-  javascript: { label: 'JavaScript (Node)', cmd: process.execPath, args: [path.join(__dirname, 'run_js.js')], version: process.version, ok: true },
-  python: { label: 'Python', cmd: null, args: [path.join(__dirname, 'run_py.py')], version: '', ok: false }
+  javascript: { label: 'JavaScript (Node)', cmd: process.execPath, args: ['-e', JS_RUNNER], version: process.version, ok: true },
+  python: { label: 'Python', cmd: null, args: ['-c', PY_RUNNER], version: '', ok: false }
 };
 
-// Thêm ngôn ngữ khác: khai báo thêm vào RUNTIMES + viết file runner tương ứng (xem run_py.py làm mẫu).
 function detectRuntimes() {
-  const cands = process.platform === 'win32' ? ['python', 'python3'] : ['python3', 'python'];
+  const cands = process.platform === 'win32' ? ['python', 'python3', 'py'] : ['python3', 'python'];
   for (const c of cands) {
     try {
       const r = spawnSync(c, ['--version'], { encoding: 'utf8', windowsHide: true, timeout: 8000 });
@@ -55,13 +137,13 @@ function runScript(lang, code, input, timeoutMs = 5000) {
     child.stdout.on('data', d => { size += d.length; if (size > MAX_OUT) { killed = 'size'; child.kill('SIGKILL'); } else stdout += d; });
     child.stderr.on('data', d => { if (stderr.length < 8000) stderr += d; });
     child.on('error', e => finish({ ok: false, error: 'Không chạy được: ' + e.message }));
-    child.on('close', code => {
+    child.on('close', code2 => {
       if (killed === 'time') return finish({ ok: false, error: `Quá thời gian cho phép (${timeoutMs} ms)` });
       if (killed === 'size') return finish({ ok: false, error: 'Output quá lớn' });
       const i = stdout.lastIndexOf(MARK);
-      if (code !== 0 || i < 0) {
+      if (code2 !== 0 || i < 0) {
         const tail = stderr.trim().split('\n').slice(-8).join('\n');
-        return finish({ ok: false, error: tail || (code === 0 ? 'Script kết thúc sớm (không trả kết quả)' : `Script thoát với mã ${code}`) });
+        return finish({ ok: false, error: tail || (code2 === 0 ? 'Script kết thúc sớm (không trả kết quả)' : `Script thoát với mã ${code2}`) });
       }
       let res;
       try { res = JSON.parse(stdout.slice(i + MARK.length)); } catch { return finish({ ok: false, error: 'Kết quả script không đọc được' }); }

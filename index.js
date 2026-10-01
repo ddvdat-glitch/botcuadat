@@ -1,10 +1,9 @@
 require('dotenv').config();
 const fs = require('fs'), path = require('path'), express = require('express');
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, Events } = require('discord.js');
 const { runScript, detectRuntimes, runtimeInfo, RUNTIMES } = require('./scriptRunner');
 
 const DB = path.join(__dirname, 'data.json');
-const TPL_DIR = path.join(__dirname, 'templates');
 
 // ====================== TIỆN ÍCH ======================
 const newId = () => 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -39,9 +38,54 @@ const defaultHierarchy = () => {
   });
   return {
     enabled: true, mute: mk(), kick: mk(), ban: mk(),
+    requirePerm: { enabled: true, reply: '{user} bạn không có quyền {action} (cần quyền: {perm}).', deleteAfter: 10 },
     botCannot: { reply: 'Bot không thể {action} {target} (role của bot thấp hơn/bằng, người đó là Admin/chủ server, hoặc bot thiếu quyền).', deleteAfter: 10 }
   };
 };
+// ====================== MẪU SCRIPT (nhúng sẵn, khi chèn vào web sẽ được LƯU TRONG data.json) ======================
+const TEMPLATES = [
+  { id: 'hello', name: 'Chào hỏi (ví dụ đơn giản)', language: 'javascript', trigger: '!hi', matchType: 'startsWith', cooldown: 2,
+    code: String.raw`reply('Xin chào ' + ctx.user.mention + '! Bạn vừa gõ: ' + (ctx.rest || '(không có gì)'));` },
+  { id: 'taixiu', name: 'Tài xỉu (xu dùng chung)', language: 'javascript', trigger: '!tx', matchType: 'startsWith', cooldown: 3,
+    code: String.raw`// !tx tai 100  |  !tx xiu 100  |  !tx (xem số xu)
+const bal = shared.coins = shared.coins || {};
+const uid = ctx.user.id;
+if (bal[uid] === undefined) bal[uid] = 1000;
+const side = (ctx.args[0] || '').toLowerCase();
+const bet = parseInt(ctx.args[1], 10);
+if (!['tai', 'xiu', 'tài', 'xỉu'].includes(side) || !(bet > 0)) {
+  reply(ctx.user.mention + ' bạn có **' + bal[uid] + '** xu.\nCách chơi: !tx tai 100 hoặc !tx xiu 100');
+  return;
+}
+if (bet > bal[uid]) { reply(ctx.user.mention + ' không đủ xu (còn ' + bal[uid] + ').'); return; }
+const d = [1, 2, 3].map(() => 1 + Math.floor(Math.random() * 6));
+const sum = d[0] + d[1] + d[2];
+const triple = d[0] === d[1] && d[1] === d[2];
+const result = sum >= 11 ? 'tài' : 'xỉu';
+const pick = side.startsWith('t') ? 'tài' : 'xỉu';
+const win = !triple && pick === result;
+bal[uid] += win ? bet : -bet;
+reply('🎲 ' + d.join(' + ') + ' = **' + sum + '** → **' + (triple ? 'bão (nhà cái ăn)' : result) + '**\n' +
+  ctx.user.mention + (win ? ' thắng +' : ' thua -') + bet + ' xu. Số dư: **' + bal[uid] + '**');` },
+  { id: 'noitu', name: 'Nối từ (tiếng Việt, 2 tiếng)', language: 'javascript', trigger: '!nt', matchType: 'startsWith', cooldown: 2,
+    code: String.raw`// !nt con mèo  ->  người sau gõ !nt mèo ăn ...
+const word = ctx.rest.trim().toLowerCase().replace(/\s+/g, ' ');
+const syl = w => w.split(' ');
+store.used = store.used || [];
+if (!word) {
+  reply(store.last ? 'Từ hiện tại: **' + store.last + '** → hãy nối bằng từ bắt đầu bằng **' + syl(store.last).at(-1) + '**' : 'Gõ !nt <từ gồm 2 tiếng> để bắt đầu.');
+  return;
+}
+if (syl(word).length !== 2) { reply('Từ phải gồm đúng 2 tiếng, vd: con mèo'); return; }
+if (store.used.includes(word)) { reply('Từ **' + word + '** đã dùng rồi!'); return; }
+if (store.last && syl(word)[0] !== syl(store.last).at(-1)) {
+  reply('Sai rồi! Từ phải bắt đầu bằng **' + syl(store.last).at(-1) + '**'); return;
+}
+store.last = word; store.used.push(word);
+if (store.used.length > 500) store.used.shift();
+reply('✅ **' + word + '** → tiếp theo: từ bắt đầu bằng **' + syl(word)[1] + '**');` }
+];
+
 const merge = (def, cur) => {
   if (!isObj(def) || !isObj(cur)) return cur === undefined ? def : cur;
   const o = { ...cur };
@@ -50,12 +94,7 @@ const merge = (def, cur) => {
 };
 
 function seedScripts() {
-  try {
-    const list = JSON.parse(fs.readFileSync(path.join(TPL_DIR, 'index.json'), 'utf8'));
-    return list.filter(t => ['taixiu', 'noitu'].includes(t.id)).map(t => cleanScript({
-      ...t, enabled: true, code: fs.readFileSync(path.join(TPL_DIR, t.file), 'utf8')
-    }));
-  } catch { return []; }
+  return TEMPLATES.filter(t => ['taixiu', 'noitu'].includes(t.id)).map(t => cleanScript({ ...t, enabled: true }));
 }
 
 function cleanScript(s = {}) {
@@ -85,6 +124,8 @@ function normalize(raw) {
   if (!isObj(d.scriptData.shared)) d.scriptData.shared = {};
   if (!isObj(d.scriptData.byScript)) d.scriptData.byScript = {};
   if (!isObj(d.roles)) d.roles = {};
+  if (!isObj(d.channels)) d.channels = {};
+  if (!isObj(d.members)) d.members = {};
   if (!Array.isArray(d.timers)) d.timers = [];
   // Chuyển dữ liệu cũ: "minutes" (phút) -> "seconds" (giây)
   const fix = a => {
@@ -113,7 +154,10 @@ const saveSoon = () => { if (!saveNow.t) saveNow.t = setTimeout(saveNow, 400); }
 saveNow(); // ghi lại ngay sau khi chuyển đổi dữ liệu cũ
 
 // ====================== BOT ======================
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
+// MEMBERS_INTENT=true (trong .env) + bật SERVER MEMBERS INTENT ở Developer Portal -> bot lấy được TOÀN BỘ thành viên cho danh sách chọn.
+// Nếu không bật, danh sách thành viên gồm những người đã từng nhắn tin khi bot online.
+const WANT_MEMBERS = /^(1|true|yes)$/i.test(process.env.MEMBERS_INTENT || '');
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, ...(WANT_MEMBERS ? [GatewayIntentBits.GuildMembers] : [])] });
 client.on('error', e => log('error', 'Discord client: ' + e.message));
 client.on('warn', w => log('system', 'Cảnh báo: ' + w));
 
@@ -154,11 +198,14 @@ const render = (text, msg, extra = {}) => {
   return String(text).replace(/\{([^{}]+)\}/g, (m, k) => {
     if (k in base) return base[k];
     const tag = db.tags.find(t => t.name === k);
-    if (!tag) return m;
-    if (tag.type === 'link') return `[${tag.label || tag.value}](${tag.hide ? '<' + tag.value + '>' : tag.value})`;
-    return tag.type === 'mention' ? `<@${tag.value}>` : tag.value;
+    return tag ? tagText(tag) : m;
   });
 };
+function tagText(tag) {
+  if (tag.type === 'link') return `[${tag.label || tag.value}](${tag.hide ? '<' + tag.value + '>' : tag.value})`;
+  return tag.type === 'mention' ? `<@${tag.value}>` : tag.value;
+}
+const renderTags = text => String(text).replace(/\{([^{}]+)\}/g, (m, k) => { const tag = db.tags.find(t => t.name === k); return tag ? tagText(tag) : m; });
 
 // Gửi tin (có ghi log, có tự xóa sau X giây)
 async function say(msg, text, { mode = 'reply', deleteAfter = 0 } = {}) {
@@ -167,7 +214,7 @@ async function say(msg, text, { mode = 'reply', deleteAfter = 0 } = {}) {
   const opts = { content, allowedMentions: { parse: ['users'], repliedUser: true } };
   try {
     const sent = mode === 'send' ? await msg.channel.send(opts) : await msg.reply(opts);
-    log('bot', content, { channel: chName(msg), guild: msg.guild?.name });
+    log('bot', content, { channel: chName(msg), channelId: msg.channelId, guild: msg.guild?.name });
     if (deleteAfter > 0) setTimeout(() => sent.delete().catch(() => {}), deleteAfter * 1000);
     return sent;
   } catch (e) { log('error', 'Gửi tin lỗi: ' + e.message, { channel: chName(msg) }); }
@@ -189,6 +236,22 @@ async function scanGuild(guild) {
       name: guild.name, ownerId: guild.ownerId, botRoleId: me.roles.highest.id, botRoleName: me.roles.highest.name,
       botPosition: me.roles.highest.position, scannedAt: Date.now(), roles: list
     };
+    // kênh chat (để chọn trong web và để nhắn bằng bot)
+    const chs = await guild.channels.fetch();
+    db.channels[guild.id] = {
+      name: guild.name,
+      channels: [...chs.values()].filter(c => c && [0, 5].includes(c.type) && c.viewable)
+        .sort((a, b) => (a.rawPosition ?? 0) - (b.rawPosition ?? 0))
+        .map(c => ({ id: c.id, name: c.name, parent: c.parent?.name || '' }))
+    };
+    // thành viên: lấy toàn bộ nếu có MEMBERS_INTENT, không thì giữ danh sách "đã từng nhắn"
+    if (WANT_MEMBERS) {
+      try {
+        const all = await guild.members.fetch();
+        const g = db.members[guild.id] = db.members[guild.id] || {};
+        for (const m of all.values()) g[m.id] = { username: m.user.username, display: m.displayName, role: m.roles.highest.name, bot: m.user.bot, t: g[m.id]?.t || 0 };
+      } catch (e) { log('error', `Không lấy được danh sách thành viên (đã bật SERVER MEMBERS INTENT ở Developer Portal chưa?): ${e.message}`); }
+    }
     saveSoon();
     log('system', `Quét role "${guild.name}": ${list.length} role. Role cao nhất của bot: ${me.roles.highest.name} (vị trí ${me.roles.highest.position}). ` +
       `Thứ tự cao→thấp: ${list.slice(0, 12).map(r => `${r.name}#${r.position}`).join(' > ')}${list.length > 12 ? ' ...' : ''}`);
@@ -197,6 +260,20 @@ async function scanGuild(guild) {
 const scanAll = () => Promise.all([...client.guilds.cache.values()].map(scanGuild));
 const scanLater = guild => { clearTimeout(scanLater[guild.id]); scanLater[guild.id] = setTimeout(() => scanGuild(guild), 3000); };
 client.on('guildCreate', scanGuild);
+
+// Ghi nhớ người đã nhắn tin -> hiện trong danh sách chọn ở web
+function rememberMember(msg) {
+  if (!msg.guild) return;
+  const g = db.members[msg.guild.id] = db.members[msg.guild.id] || {};
+  const m = msg.member, now = Date.now();
+  const rec = { username: msg.author.username, display: m?.displayName || msg.author.globalName || msg.author.username, role: m ? m.roles.highest.name : '', bot: !!msg.author.bot, t: now };
+  const o = g[msg.author.id];
+  if (o && o.username === rec.username && o.display === rec.display && o.role === rec.role && now - (o.t || 0) < 600000) return;
+  g[msg.author.id] = rec;
+  const ids = Object.keys(g);
+  if (ids.length > 3000) ids.sort((a, b) => (g[a].t || 0) - (g[b].t || 0)).slice(0, ids.length - 3000).forEach(k => delete g[k]);
+  saveSoon();
+}
 ['roleCreate', 'roleUpdate', 'roleDelete'].forEach(ev => client.on(ev, (a, b) => scanLater((b || a).guild)));
 
 const rankOf = (guild, m) => guild.ownerId === m.id ? Infinity : m.roles.highest.position;
@@ -208,6 +285,12 @@ const roleNameOf = (guild, m) => guild.ownerId === m.id ? 'Chủ server' : m.rol
 const OUT_VN = { higher: 'cao cấp hơn', equal: 'bằng cấp với', lower: 'thấp cấp hơn' };
 const LABEL = { mute: 'mute', unmute: 'bỏ mute', kick: 'kick', ban: 'ban', unban: 'unban', addRole: 'thêm role cho', removeRole: 'gỡ role của' };
 const POLICY_OF = { mute: 'mute', unmute: 'mute', kick: 'kick', ban: 'ban' };
+// Quyền Discord mà NGƯỜI GÕ phải có khi tác động lên người khác
+const PERM_OF = {
+  mute: ['ModerateMembers', 'Timeout thành viên'], unmute: ['ModerateMembers', 'Timeout thành viên'],
+  kick: ['KickMembers', 'Kick thành viên'], ban: ['BanMembers', 'Ban thành viên'], unban: ['BanMembers', 'Ban thành viên'],
+  addRole: ['ManageRoles', 'Quản lý vai trò'], removeRole: ['ManageRoles', 'Quản lý vai trò']
+};
 
 // ====================== HÀNH ĐỘNG: mute / kick / ban tính theo GIÂY ======================
 async function runAction(a, msg) {
@@ -238,6 +321,18 @@ async function execAction(a, msg) {
   const member = needMember ? await guild.members.fetch(uid).catch(() => null) : null;
 
   if (needMember && !member && a.type !== 'ban') return log('error', `Không tìm thấy thành viên ${uid} trong server để ${label}`, { user: msg.author.username });
+
+  // 0) Người gõ có QUYỀN (role) để làm việc này lên người khác không? (Admin / chủ server luôn được)
+  const RP = H.requirePerm, need = PERM_OF[a.type];
+  if (need && !selfTarget && RP && RP.enabled) {
+    const actor0 = msg.member || await guild.members.fetch(msg.author.id).catch(() => null);
+    const has = guild.ownerId === msg.author.id || (actor0 && (actor0.permissions.has('Administrator') || actor0.permissions.has(need[0])));
+    if (!has) {
+      log('action', `CHẶN ${label}: người gõ không có quyền ${need[1]}`, { user: msg.author.username });
+      if (RP.reply) await say(msg, render(RP.reply, msg, { target: `<@${uid}>`, action: label, perm: need[1] }), { mode: 'send', deleteAfter: RP.deleteAfter });
+      return;
+    }
+  }
 
   // 1) So sánh cấp bậc: người gõ lệnh vs đối tượng (bỏ qua khi đối tượng chính là người gõ)
   const pol = POLICY_OF[a.type];
@@ -391,7 +486,7 @@ function logChat(msg) {
   let t = msg.content || '';
   if (msg.attachments?.size) t += ` [+${msg.attachments.size} tệp]`;
   if (!t.trim()) { if (!msg.embeds?.length) return; t = '[embed]'; }
-  log('chat', t, { user: msg.author.username + (msg.author.bot ? ' [bot]' : ''), channel: chName(msg), guild: msg.guild?.name });
+  log('chat', t, { user: msg.author.username + (msg.author.bot ? ' [bot]' : ''), channel: chName(msg), channelId: msg.channelId, msgId: msg.id, guild: msg.guild?.name });
 }
 
 async function handleCommands(msg) {
@@ -417,13 +512,14 @@ client.on('messageCreate', async msg => {
   try {
     if (msg.author.id === client.user?.id) return;
     logChat(msg);
+    rememberMember(msg);
     if (msg.author.bot) return;
     if (await handleScripts(msg)) return;
     await handleCommands(msg);
   } catch (e) { log('error', 'messageCreate: ' + (e.stack || e.message)); }
 });
 
-client.once('clientReady', async () => {
+client.once(Events.ClientReady, async () => {
   log('system', 'Bot online: ' + client.user.tag + ` | ${client.guilds.cache.size} server`);
   await scanAll();            // quét role ngay khi khởi động
   processTimers(); setInterval(processTimers, 10000);
@@ -447,12 +543,7 @@ app.put('/api/data', (req, res) => {
   db = normalize(next); saveNow(); res.json({ ok: true });
 });
 
-app.get('/api/templates', (req, res) => {
-  try {
-    const list = JSON.parse(fs.readFileSync(path.join(TPL_DIR, 'index.json'), 'utf8'));
-    res.json(list.map(t => ({ ...t, code: fs.readFileSync(path.join(TPL_DIR, t.file), 'utf8') })));
-  } catch (e) { res.json([]); }
-});
+app.get('/api/templates', (req, res) => res.json(TEMPLATES));
 
 app.get('/api/logs', (req, res) => {
   const after = +req.query.after || 0;
@@ -460,7 +551,27 @@ app.get('/api/logs', (req, res) => {
 });
 app.post('/api/logs/clear', (req, res) => { LOGS.length = 0; res.json({ ok: true }); });
 
-app.post('/api/scan', async (req, res) => { await scanAll(); res.json({ roles: db.roles }); });
+app.post('/api/scan', async (req, res) => { await scanAll(); res.json({ roles: db.roles, channels: db.channels, members: db.members }); });
+
+// Nhắn bằng bot từ tab Log (hỗ trợ {tên_thẻ}, <@ID> để tag, trả lời 1 tin nhắn cụ thể)
+app.post('/api/send', async (req, res) => {
+  try {
+    const { channelId, content, replyTo } = req.body || {};
+    const text = renderTags(String(content ?? '')).slice(0, 2000);
+    const id = idFrom(channelId);
+    if (!text.trim()) return res.status(400).json({ error: 'Chưa nhập nội dung' });
+    if (!id) return res.status(400).json({ error: 'Chưa chọn kênh' });
+    if (!client.isReady()) return res.status(503).json({ error: 'Bot chưa online' });
+    const ch = await client.channels.fetch(id).catch(() => null);
+    if (!ch || !ch.isTextBased() || typeof ch.send !== 'function') return res.status(404).json({ error: 'Không tìm thấy kênh hoặc bot không gửi được vào kênh này' });
+    const opts = { content: text, allowedMentions: { parse: ['users'] } };
+    const rid = idFrom(replyTo);
+    if (rid) opts.reply = { messageReference: rid, failIfNotExists: false };
+    await ch.send(opts);
+    log('bot', text, { user: client.user.username + ' (gửi từ web)', channel: ch.name || id, channelId: ch.id, guild: ch.guild?.name });
+    res.json({ ok: true });
+  } catch (e) { log('error', 'Gửi tin từ web lỗi: ' + e.message); res.status(500).json({ error: e.message }); }
+});
 
 app.put('/api/store', (req, res) => {
   const { scope, value } = req.body || {};
@@ -491,7 +602,7 @@ app.post('/api/script/test', async (req, res) => {
 if (!process.env.BOT_TEST) {
   detectRuntimes();
   log('system', 'Môi trường script: ' + Object.entries(runtimeInfo()).map(([k, v]) => `${k}=${v.ok ? v.version : 'KHÔNG CÓ'}`).join(', '));
-  client.login(process.env.DISCORD_TOKEN).catch(e => log('error', 'Đăng nhập Discord thất bại: ' + e.message));
+  client.login(process.env.DISCORD_TOKEN).catch(e => log('error', 'Đăng nhập Discord thất bại: ' + e.message + (/disallowed intents/i.test(e.message) ? ' → bật MESSAGE CONTENT INTENT (và SERVER MEMBERS INTENT nếu MEMBERS_INTENT=true) ở Developer Portal > Bot.' : '')));
   app.listen(process.env.PORT || 3000, () => log('system', 'Web: http://localhost:' + (process.env.PORT || 3000)));
   const bye = () => { try { saveNow(); } catch {} process.exit(0); };
   process.on('SIGINT', bye); process.on('SIGTERM', bye);
