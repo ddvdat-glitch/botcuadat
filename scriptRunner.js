@@ -36,12 +36,8 @@ function jsRunner() {
       addRole: (t, roleId) => act('addRole', t, { roleId }),
       removeRole: (t, roleId) => act('removeRole', t, { roleId }),
       deleteMsg: () => { out.delete = true; },
-      react: e => { out.reactions.push(String(e)); },
-      // Clone emoji / sticker vào server (bot tải ảnh từ CDN của Discord rồi tạo)
-      addEmoji: (url, name, extra) => act('addEmoji', 'sender', { url, name, ...extra }),
-      addSticker: (url, name, extra) => act('addSticker', 'sender', { url, name, ...extra })
+      react: e => { out.reactions.push(String(e)); }
     };
-    api.add_emoji = api.addEmoji; api.add_sticker = api.addSticker;
     api.add_role = api.addRole; api.remove_role = api.removeRole; api.delete_msg = api.deleteMsg;
 
     try {
@@ -78,14 +74,11 @@ def add_role(target, role_id): _act('addRole', target, roleId=role_id)
 def remove_role(target, role_id): _act('removeRole', target, roleId=role_id)
 def delete_msg(): out['delete'] = True
 def react(emoji): out['reactions'].append(str(emoji))
-def add_emoji(url, name, **kw): _act('addEmoji', 'sender', url=url, name=name, **kw)
-def add_sticker(url, name, **kw): _act('addSticker', 'sender', url=url, name=name, **kw)
-addEmoji, addSticker = add_emoji, add_sticker
 addRole, removeRole, deleteMsg = add_role, remove_role, delete_msg
 
 env = {'__name__': '__main__', 'ctx': ctx, 'store': store, 'shared': shared, 'reply': reply, 'mute': mute,
        'unmute': unmute, 'ban': ban, 'unban': unban, 'kick': kick, 'add_role': add_role, 'remove_role': remove_role,
-       'addRole': addRole, 'removeRole': removeRole, 'add_emoji': add_emoji, 'add_sticker': add_sticker, 'addEmoji': addEmoji, 'addSticker': addSticker, 'delete_msg': delete_msg, 'deleteMsg': deleteMsg, 'react': react}
+       'addRole': addRole, 'removeRole': removeRole, 'delete_msg': delete_msg, 'deleteMsg': deleteMsg, 'react': react}
 try:
     exec(compile(inp.get('code') or '', '<script>', 'exec'), env)
 except SystemExit:
