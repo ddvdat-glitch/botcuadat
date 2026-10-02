@@ -1,6 +1,6 @@
 require('dotenv').config();
 const fs = require('fs'), path = require('path'), express = require('express');
-const { Client, GatewayIntentBits, Events } = require('discord.js');
+const { Client, GatewayIntentBits, Events, ButtonBuilder, ButtonStyle, ActionRowBuilder, MessageFlags } = require('discord.js');
 const { runScript, detectRuntimes, runtimeInfo, RUNTIMES } = require('./scriptRunner');
 
 const DB = path.join(__dirname, 'data.json');
@@ -581,13 +581,13 @@ function buildCtx(msg, pa, text = msg.content) {
   const m = msg.member;
   const roles = m ? [...m.roles.cache.values()].filter(r => r.name !== '@everyone') : [];
   return {
-    content: text, rest: pa.rest, args: pa.args, match: pa.match,
+    content: text, rest: pa.rest, args: pa.args, match: pa.match, event: 'message',
     user: {
       id: msg.author.id, username: msg.author.username, display: m?.displayName || msg.author.username, mention: `<@${msg.author.id}>`,
       roles: roles.map(r => r.name), roleIds: roles.map(r => r.id),
       isAdmin: !!m?.permissions.has('Administrator'), isOwner: msg.guild?.ownerId === msg.author.id
     },
-    mentions: [...msg.mentions.users.values()].map(u => ({ id: u.id, username: u.username, mention: `<@${u.id}>` })),
+    mentions: [...msg.mentions.users.values()].map(u => ({ id: u.id, username: u.username, mention: `<@${u.id}>`, bot: !!u.bot })),
     channelId: msg.channel.id, guildId: msg.guild?.id || '', guildName: msg.guild?.name || '', messageId: msg.id, now: Date.now()
   };
 }
@@ -624,6 +624,7 @@ async function execScript(s, msg, text = msg.content) {
   saveSoon();
   log('script', `"${s.name}" chạy xong ${r.ms}ms` + (r.stdout && r.stdout.trim() ? '\nprint: ' + r.stdout.trim().slice(0, 600) : ''), { user: msg.author.username, channel: chName(msg) });
   await applyScriptOutput(s, msg, r.out || {});
+  if ((r.out?.ui || []).length) await applyUi(s, r.out.ui, { channel: msg.channel, channelId: msg.channel.id, guildId: msg.guild?.id || '' });
 }
 
 async function applyScriptOutput(s, msg, out) {
@@ -640,6 +641,121 @@ async function applyScriptOutput(s, msg, out) {
     await runAction(act, msg);
   }
 }
+
+
+// ====================== NÚT BẤM / SỬA TIN / HẸN GIỜ CHO SCRIPT (ui.*) ======================
+// customId nút = sx:<idScript>:<e|u>:<dữ liệu>   e = mở tin trả lời ẨN (ephemeral), u = cập nhật tin chứa nút
+const uiMsgs = new Map(), uiEphem = new Map();      // tag -> tin đã gửi / tin ẩn (RAM)
+const remember = (m, k, v, max = 800) => { m.delete(k); m.set(k, v); if (m.size > max) m.delete(m.keys().next().value); };
+const BTN_STYLE = { primary: ButtonStyle.Primary, secondary: ButtonStyle.Secondary, success: ButtonStyle.Success, danger: ButtonStyle.Danger };
+let pendingTimers = 0;
+
+function uiPayload(s, p) {
+  if (typeof p === 'string') p = { content: p };
+  p = isObj(p) ? p : {};
+  const o = { allowedMentions: { parse: [], users: (Array.isArray(p.mentions) ? p.mentions : []).map(idFrom).filter(Boolean).slice(0, 10) } };
+  if (p.content != null) o.content = String(p.content).slice(0, 2000);
+  if (Array.isArray(p.buttons)) {
+    o.components = p.buttons.slice(0, 5).map(row => new ActionRowBuilder().addComponents((Array.isArray(row) ? row : [row]).slice(0, 5).map(b => {
+      const bb = new ButtonBuilder().setLabel(String(b.label || '·').slice(0, 80)).setStyle(BTN_STYLE[b.style] || ButtonStyle.Secondary)
+        .setCustomId(`sx:${s.id}:${b.ephemeral ? 'e' : 'u'}:${String(b.id || 'x')}`.slice(0, 100));
+      if (b.disabled) bb.setDisabled(true);
+      return bb;
+    }))).filter(r => r.components.length);
+  }
+  return o;
+}
+
+async function applyUi(s, ops, t) {
+  let used = false;   // đã dùng lượt phản hồi đầu của interaction chưa
+  for (const op of (ops || []).slice(0, 20)) {
+    try {
+      const p = op.payload;
+      if (op.type === 'send') {
+        if (!t.channel) continue;
+        const m = await t.channel.send(uiPayload(s, p));
+        if (op.tag) remember(uiMsgs, String(op.tag), { channelId: t.channel.id, id: m.id });
+      } else if ((op.type === 'update' || op.type === 'reply') && t.inter) {
+        if (!used && (op.type === 'update' || t.kind === 'e')) {
+          await t.inter.editReply(uiPayload(s, p)); used = true;
+          if (op.tag) remember(uiEphem, String(op.tag), { inter: t.inter, id: '@original' });
+        } else if (op.type === 'reply') {
+          const o = uiPayload(s, p);
+          if (!(isObj(p) && p.ephemeral === false)) o.flags = MessageFlags.Ephemeral;
+          const m = await t.inter.followUp(o);
+          if (op.tag) remember(uiEphem, String(op.tag), { inter: t.inter, id: m.id });
+        }
+      } else if (op.type === 'edit') {
+        const e = uiEphem.get(String(op.tag));
+        if (e) await e.inter.webhook.editMessage(e.id, uiPayload(s, p));
+        else {
+          const r = uiMsgs.get(String(op.tag));
+          if (r) { const ch = await client.channels.fetch(r.channelId); const m = await ch.messages.fetch(r.id); await m.edit(uiPayload(s, p)); }
+        }
+      } else if (op.type === 'after') {
+        if (pendingTimers >= 300) continue;
+        pendingTimers++;
+        const sec = clampNum(op.seconds, 1, 600), data = String(op.data ?? ''), channelId = t.channelId, guildId = t.guildId;
+        setTimeout(() => {
+          pendingTimers--;
+          enqueue(() => runUi(s.id, { event: 'timer', data, channelId, guildId })).catch(e => log('error', `Hẹn giờ script "${s.name}": ${e.message}`));
+        }, sec * 1000);
+      }
+    } catch (e) { log('error', `ui.${op.type} của "${s.name}": ${e.message}`); }
+  }
+  if (t.inter && t.kind === 'e' && !used) t.inter.deleteReply().catch(() => {});   // tin ẩn chờ mà script không trả gì -> xóa
+}
+
+function uiCtx(ev) {
+  const i = ev.inter, m = i?.member, u = i?.user;
+  const roles = m?.roles?.cache ? [...m.roles.cache.values()].filter(r => r.name !== '@everyone') : [];
+  return {
+    content: '', rest: '', args: [], match: [], event: ev.event,
+    user: {
+      id: u?.id || '', username: u?.username || '', display: m?.displayName || u?.username || '', mention: u ? `<@${u.id}>` : '',
+      roles: roles.map(r => r.name), roleIds: roles.map(r => r.id),
+      isAdmin: !!m?.permissions?.has?.('Administrator'), isOwner: !!u && i?.guild?.ownerId === u.id
+    },
+    mentions: [], channelId: ev.channelId || '', guildId: ev.guildId || '', guildName: i?.guild?.name || '', messageId: i?.message?.id || '', now: Date.now(),
+    interaction: i ? { customId: ev.data, kind: ev.kind, messageId: i.message?.id || '', userId: u.id } : null,
+    timer: ev.event === 'timer' ? { data: ev.data } : null
+  };
+}
+
+// Chạy script cho sự kiện nút bấm / hẹn giờ (cùng hàng đợi với tin nhắn nên dữ liệu không bị ghi đè)
+async function runUi(sid, ev) {
+  const s = db.scripts.find(x => x.id === sid);
+  if (!s || s.enabled === false || !s.code) return;
+  const r = await runScript(s.language, s.code, { ctx: uiCtx(ev), store: clone(db.scriptData.byScript[s.id]), shared: clone(db.scriptData.shared) }, s.timeoutMs);
+  const who = ev.inter?.user?.username || 'hẹn giờ';
+  if (!r.ok) {
+    log('error', `Script "${s.name}" lỗi ở ${ev.event} (${r.ms}ms):\n${r.error}`, { user: who });
+    if (ev.inter) { const o = { content: '⚠️ Script bị lỗi, xem tab Log.' }; if (ev.kind === 'e') await ev.inter.editReply(o).catch(() => {}); else await ev.inter.followUp({ ...o, flags: MessageFlags.Ephemeral }).catch(() => {}); }
+    return;
+  }
+  db.scriptData.byScript[s.id] = r.store || {};
+  db.scriptData.shared = r.shared || {};
+  saveSoon();
+  log('script', `"${s.name}" (${ev.event}) xong ${r.ms}ms` + (r.stdout && r.stdout.trim() ? '\nprint: ' + r.stdout.trim().slice(0, 600) : ''), { user: who });
+  const out = r.out || {};
+  const ops = [...(out.replies || []).slice(0, 5).map(text => ({ type: ev.inter ? 'reply' : 'send', payload: { content: text } })), ...(out.ui || [])];
+  let channel = ev.channel;
+  if (!channel && ev.channelId) channel = await client.channels.fetch(ev.channelId).catch(() => null);
+  await applyUi(s, ops, { channel, inter: ev.inter, kind: ev.kind, channelId: ev.channelId, guildId: ev.guildId });
+}
+
+client.on(Events.InteractionCreate, async i => {
+  try {
+    if (!i.isButton() || !String(i.customId).startsWith('sx:')) return;
+    const [, sid, kind, ...rest] = i.customId.split(':'), data = rest.join(':');
+    const s = db.scripts.find(x => x.id === sid);
+    if (!s || s.enabled === false) { await i.reply({ content: '⚠️ Script này đã bị tắt hoặc bị xóa.', flags: MessageFlags.Ephemeral }); return; }
+    if (kind === 'e') await i.deferReply({ flags: MessageFlags.Ephemeral }); else await i.deferUpdate();   // báo nhận ngay (Discord chỉ cho 3 giây)
+    const channel = i.channel || await client.channels.fetch(i.channelId).catch(() => null);
+    log('cmd', `Nút "${data}" của script "${s.name}"`, { user: i.user.username });
+    await enqueue(() => runUi(sid, { event: 'button', inter: i, kind: kind === 'e' ? 'e' : 'u', data, channel, channelId: i.channelId, guildId: i.guildId }));
+  } catch (e) { log('error', 'interaction: ' + (e.stack || e.message)); }
+});
 
 // ====================== SỰ KIỆN ======================
 function logChat(msg) {
