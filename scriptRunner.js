@@ -19,14 +19,22 @@ function jsRunner() {
     try { inp = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
     catch { console.error('Dữ liệu đầu vào không hợp lệ'); process.exit(2); }
 
-    const out = { replies: [], reactions: [], actions: [], delete: false };
+    const out = { replies: [], reactions: [], actions: [], delete: false, ui: [] };
     const ctx = inp.ctx || {}, store = inp.store || {}, shared = inp.shared || {};
     const show = a => typeof a === 'string' ? a : (() => { try { return JSON.stringify(a); } catch { return String(a); } })();
     const print = (...a) => process.stdout.write(a.map(show).join(' ') + '\n');
     const act = (type, target, extra) => out.actions.push({ type, target: target == null ? 'sender' : String(target), ...extra });
 
+    // ui: nút bấm / sửa tin / hẹn giờ (bot thực hiện sau khi script chạy xong)
+    const ui = {
+      send: (payload, tag) => out.ui.push({ type: 'send', payload, tag }),          // gửi tin MỚI vào kênh
+      reply: (payload, tag) => out.ui.push({ type: 'reply', payload, tag }),        // khi đang xử lý nút bấm: trả lời (mặc định CHỈ NGƯỜI BẤM thấy)
+      update: (payload, tag) => out.ui.push({ type: 'update', payload, tag }),      // khi đang xử lý nút bấm: sửa chính tin chứa nút đó
+      edit: (tag, payload) => out.ui.push({ type: 'edit', tag, payload }),          // sửa tin đã gửi bằng tag (kể cả tin ẩn)
+      after: (seconds, data) => out.ui.push({ type: 'after', seconds, data })       // sau N giây chạy lại script với ctx.event = 'timer'
+    };
     const api = {
-      ctx, store, shared, print, require,
+      ctx, store, shared, print, require, ui,
       reply: (...t) => { out.replies.push(t.map(String).join(' ')); },
       mute: (t, seconds, reason) => act('mute', t, { seconds, reason }),
       unmute: (t, reason) => act('unmute', t, { reason }),
