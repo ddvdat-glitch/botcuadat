@@ -287,5 +287,1110 @@
       "timeoutMs": 15000,
       "code": "// SCRIPT - AI OLLAMA (chạy local): bị TAG hoặc bị REPLY thì trả lời cực ngắn 1-2 từ, cục súc, chửi bậy. Có bật/tắt.\n// BƯỚC 1: điền ID bot vào BOT_ID bên dưới VÀ thay chữ ID_BOT trong ô \"Lệnh kích hoạt\" bằng đúng ID đó. Ô kích hoạt (Regex): <@!?ID_BOT>|^!ai\\b\n//   -> chế độ này nhận TAG. Muốn nhận cả REPLY (bấm trả lời tin của bot, để bật ping): đổi ô kích hoạt thành [\\s\\S]+ (Regex).\n//      Lưu ý: [\\s\\S]+ làm script này nhận MỌI tin nên các script/lệnh khác phía sau sẽ không chạy nữa -> để script này ở CUỐI danh sách.\n// BƯỚC 2: máy chạy bot cài Ollama và chạy: ollama pull qwen2.5:7b\n// Lệnh: !ai on | !ai off | !ai model <tên> | !ai clear | !ai (xem trạng thái). Bật/tắt/đổi model chỉ Admin / chủ server.\nconst BOT_ID = '999000000000000001';\nconst OLLAMA_URL = 'http://127.0.0.1:11434/api/chat';\nconst DEFAULT_MODEL = 'qwen2.5:7b';\nconst MAX_WORDS = 2;        // số từ tối đa của câu trả lời\nconst MEMORY_TURNS = 6;     // nhớ bao nhiêu lượt chat gần nhất của mỗi kênh\nconst HTTP_TIMEOUT = 13000; // ms, phải nhỏ hơn \"Giới hạn chạy (ms)\" của script (15000)\nconst SYSTEM_PROMPT = [\n  'Mày là một thằng bạn cục súc, mất dạy, nói chuyện kiểu chợ búa trên mạng.',\n  'LUÔN trả lời bằng tiếng Việt, đúng 1 đến 2 TỪ, tuyệt đối không giải thích, không dài dòng, không xin lỗi, không chào hỏi.',\n  'Giọng điệu thô tục, chửi thề, gắt gỏng, xéo xắt, ví dụ: \"đm\", \"câm mồm\", \"ngu vl\", \"cút\", \"khùng à\", \"cc\", \"biến\", \"vãi lồn\".',\n  'Chỉ chửi kiểu cợt nhả, trêu chọc giữa bạn bè. KHÔNG xúc phạm chủng tộc, tôn giáo, giới tính, khuyết tật hay dòng tộc; KHÔNG đe dọa bạo lực thật.',\n  'Nếu câu hỏi đòi thông tin thật, vẫn trả lời cộc lốc 1-2 từ.',\n  'Chỉ in ra câu trả lời, không giải thích, không ngoặc kép, không emoji.'\n].join('\\n');\n\nconst isStaff = ctx.user.isAdmin || ctx.user.isOwner;\nconst text = String(ctx.content || '').trim();\nconst model = store.model || DEFAULT_MODEL;\n\n// ---- Lệnh điều khiển ----\nconst cmd = text.match(/^!ai(?:\\s+(\\S+))?(?:\\s+(.+))?$/i);\nif (cmd) {\n  const sub = (cmd[1] || '').toLowerCase(), arg = (cmd[2] || '').trim();\n  if (['on', 'bat', 'bật', 'off', 'tat', 'tắt', 'model', 'clear'].includes(sub) && !isStaff) return 'Chỉ Admin / chủ server mới dùng được.';\n  if (['on', 'bat', 'bật'].includes(sub)) { store.enabled = true; return '✅ AI đã **BẬT**. Tag hoặc reply bot để nói chuyện.'; }\n  if (['off', 'tat', 'tắt'].includes(sub)) { store.enabled = false; return '⛔ AI đã **TẮT**.'; }\n  if (sub === 'model') { if (!arg) return 'Model hiện tại: `' + model + '`'; store.model = arg; return 'Đã đổi model sang `' + arg + '`'; }\n  if (sub === 'clear') { store.hist = {}; return '🧹 Đã xóa trí nhớ.'; }\n  return 'AI đang **' + (store.enabled === false ? 'TẮT' : 'BẬT') + '** | model: `' + model + '`';\n}\n\n// ---- Chỉ trả lời khi bị tag / reply (reply có ping thì ctx.mentions chứa bot) ----\nif (!/^\\d{15,25}$/.test(BOT_ID)) { print('Chưa điền BOT_ID ở đầu script.'); return; }\nconst tagged = text.includes('<@' + BOT_ID + '>') || text.includes('<@!' + BOT_ID + '>') || (ctx.mentions || []).some(m => m.id === BOT_ID);\nif (!tagged) return;\nif (store.enabled === false) return;\n\n// ---- Chuẩn bị nội dung ----\nlet q = text.replace(/<@!?\\d{15,25}>/g, ' ').replace(/\\s+/g, ' ').trim();\nif (!q) q = '(chỉ gọi tên, không nói gì)';\nconst userLine = ctx.user.display + ': ' + q.slice(0, 400);\nstore.hist = store.hist || {};\nconst hist = store.hist[ctx.channelId] = store.hist[ctx.channelId] || [];\nconst messages = [{ role: 'system', content: SYSTEM_PROMPT }, ...hist, { role: 'user', content: userLine }];\n\n// ---- Gọi Ollama ----\nconst ac = new AbortController();\nconst timer = setTimeout(() => ac.abort(), HTTP_TIMEOUT);\nlet out = '';\ntry {\n  const res = await fetch(OLLAMA_URL, {\n    method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ac.signal,\n    body: JSON.stringify({ model, messages, stream: false, think: false, keep_alive: '30m', options: { temperature: 0.9, top_p: 0.9, num_predict: 24 } })\n  });\n  if (!res.ok) throw new Error('Ollama trả về HTTP ' + res.status + ' - ' + (await res.text()).slice(0, 200));\n  out = String(((await res.json()).message || {}).content || '');\n} catch (e) {\n  throw new Error(e.name === 'AbortError'\n    ? 'Ollama quá chậm (>' + HTTP_TIMEOUT + 'ms): model đang nạp? thử lại hoặc dùng model nhỏ hơn'\n    : 'Không gọi được Ollama (' + OLLAMA_URL + '): ' + e.message + ' - đã chạy ollama và \"ollama pull ' + model + '\" chưa?');\n} finally { clearTimeout(timer); }\n\n// ---- Làm sạch + ép ngắn ----\nout = out.replace(/<think>[\\s\\S]*?<\\/think>/gi, '').split('\\n').map(s => s.trim()).filter(Boolean)[0] || '';\nout = out.replace(/^[\"'“”‘’`*_\\-–\\s]+|[\"'“”‘’`*_\\s]+$/g, '').replace(/^(mày|bot|ai)\\s*[:：]\\s*/i, '');\nout = out.split(/\\s+/).filter(Boolean).slice(0, MAX_WORDS).join(' ').replace(/[.,;:!?…]+$/, '');\nif (!out) out = 'cút';\n\n// ---- Lưu trí nhớ ----\nhist.push({ role: 'user', content: userLine }, { role: 'assistant', content: out });\nwhile (hist.length > MEMORY_TURNS * 2) hist.shift();\nreturn out;\n"
     }
-  ]
+  ],
+  "tutien": {
+    "v": 1,
+    "players": {},
+    "scriptStore": {},
+    "settings": {
+      "slots": 4,
+      "maxRounds": 12,
+      "mpRegen": 0.12,
+      "trainRandom": 0.25,
+      "failLoss": 0.5,
+      "dummyScale": 1,
+      "duelRewardX": 3,
+      "autoCreate": true
+    },
+    "realms": [
+      {
+        "id": "pham_nhan",
+        "name": "Phàm Nhân",
+        "emoji": "🧍",
+        "cap": 0,
+        "color": "#9ca3af",
+        "layer": 0,
+        "b0": 1,
+        "bStep": 0,
+        "growth": 1,
+        "tierNames": [
+          "Phàm thể"
+        ],
+        "expB0": 1.3,
+        "expStep": 0,
+        "trains": 8,
+        "chance": 0.9,
+        "desc": "Sinh linh thường. Không thể dẫn dắt hậu thiên khí.",
+        "locked": false
+      },
+      {
+        "id": "vo_gia",
+        "name": "Võ Giả",
+        "emoji": "🥋",
+        "cap": 0,
+        "color": "#a3a3a3",
+        "layer": 0,
+        "b0": 3,
+        "bStep": 0.2,
+        "growth": 1.15,
+        "tierNames": [
+          "Tầng 1",
+          "Tầng 2",
+          "Tầng 3",
+          "Tầng 4",
+          "Tầng 5",
+          "Tầng 6",
+          "Tầng 7",
+          "Tầng 8",
+          "Tầng 9"
+        ],
+        "expB0": 2.5,
+        "expStep": 0.4,
+        "trains": 10,
+        "chance": 0.75,
+        "desc": "Mạnh gấp trăm lần phàm nhân vẫn chỉ là cấp 0, không điều khiển được hậu thiên khí.",
+        "locked": false
+      },
+      {
+        "id": "luyen_tinh_hoa_khi",
+        "name": "Luyện Tinh Hóa Khí",
+        "emoji": "🌬️",
+        "cap": 1,
+        "color": "#60a5fa",
+        "layer": 0,
+        "b0": 9,
+        "bStep": 0.8,
+        "growth": 1.3,
+        "tierNames": [
+          "Tầng 1",
+          "Tầng 2",
+          "Tầng 3",
+          "Tầng 4",
+          "Tầng 5",
+          "Tầng 6",
+          "Tầng 7",
+          "Tầng 8",
+          "Tầng 9"
+        ],
+        "expB0": 6,
+        "expStep": 1.2,
+        "trains": 12,
+        "chance": 0.6,
+        "desc": "Dẫn hậu thiên chi khí vào thân, mài giũa hòa với tinh. Mạnh nhất có thể diệt quốc.",
+        "locked": false
+      },
+      {
+        "id": "luyen_khi_hoa_than",
+        "name": "Luyện Khí Hóa Thần",
+        "emoji": "✨",
+        "cap": 1,
+        "color": "#a78bfa",
+        "layer": 0,
+        "b0": 1000000,
+        "bStep": 200000,
+        "growth": 1.8,
+        "tierNames": [
+          "Tầng 1",
+          "Tầng 2",
+          "Tầng 3",
+          "Tầng 4",
+          "Tầng 5",
+          "Tầng 6",
+          "Tầng 7",
+          "Tầng 8",
+          "Tầng 9"
+        ],
+        "expB0": 1200000,
+        "expStep": 300000,
+        "trains": 14,
+        "chance": 0.45,
+        "desc": "Gộp tam hoa ngũ khí thành một, sinh ra Thần. Hủy nhục thân dễ dàng tái tạo. Diệt thế giả — chỉ số đã tiến sát vô hạn.",
+        "locked": false
+      },
+      {
+        "id": "luyen_than_hoan_hu",
+        "name": "Luyện Thần Hoàn Hư",
+        "emoji": "🌌",
+        "cap": 1,
+        "color": "#818cf8",
+        "layer": 1,
+        "b0": 0,
+        "bStep": 40,
+        "growth": 1.5,
+        "tierNames": [
+          "Sơ kỳ",
+          "Trung kỳ",
+          "Hậu kỳ",
+          "Đại viên mãn"
+        ],
+        "expB0": 0,
+        "expStep": 25,
+        "trains": 16,
+        "chance": 0.3,
+        "desc": "Thần quy về Hư, hòa thiên địa, cảm nhận pháp tắc. Từ đây mỗi tiểu cảnh giới cách nhau VÔ HẠN.",
+        "locked": false
+      },
+      {
+        "id": "luyen_hu_hop_dao",
+        "name": "Luyện Hư Hợp Đạo",
+        "emoji": "☯️",
+        "cap": 1,
+        "color": "#c084fc",
+        "layer": 2,
+        "b0": 0,
+        "bStep": 60,
+        "growth": 1.5,
+        "tierNames": [
+          "Sơ kỳ",
+          "Trung kỳ",
+          "Hậu kỳ",
+          "Đại viên mãn"
+        ],
+        "expB0": 0,
+        "expStep": 40,
+        "trains": 18,
+        "chance": 0.25,
+        "desc": "Chưởng khống, sáng tạo, hủy diệt toàn bộ tiểu thiên. Toàn năng trong giới nhưng chưa toàn tri.",
+        "locked": false
+      },
+      {
+        "id": "truc_co",
+        "name": "Trúc Cơ",
+        "emoji": "🏯",
+        "cap": 2,
+        "color": "#f472b6",
+        "layer": 3,
+        "b0": 0,
+        "bStep": 90,
+        "growth": 1.5,
+        "tierNames": [
+          "Sơ kỳ",
+          "Trung kỳ",
+          "Hậu kỳ",
+          "Đại viên mãn"
+        ],
+        "expB0": 0,
+        "expStep": 60,
+        "trains": 20,
+        "chance": 0.2,
+        "desc": "Tự thân là tiểu thiên, kẻ chưởng khống trung thiên.",
+        "locked": false
+      },
+      {
+        "id": "kim_dan",
+        "name": "Kim Đan",
+        "emoji": "🟡",
+        "cap": 2,
+        "color": "#fbbf24",
+        "layer": 4,
+        "b0": 0,
+        "bStep": 120,
+        "growth": 1.5,
+        "tierNames": [
+          "Sơ kỳ",
+          "Trung kỳ",
+          "Hậu kỳ",
+          "Đại viên mãn"
+        ],
+        "expB0": 0,
+        "expStep": 80,
+        "trains": 20,
+        "chance": 0.2,
+        "desc": "Ép trung thiên vô hạn thành kim đan, thai nghén thần mới. Diệt thế trung thiên.",
+        "locked": false
+      },
+      {
+        "id": "nguyen_anh",
+        "name": "Nguyên Anh",
+        "emoji": "👶",
+        "cap": 2,
+        "color": "#fb923c",
+        "layer": 5,
+        "b0": 0,
+        "bStep": 160,
+        "growth": 1.5,
+        "tierNames": [
+          "Sơ kỳ",
+          "Trung kỳ",
+          "Hậu kỳ",
+          "Đại viên mãn"
+        ],
+        "expB0": 0,
+        "expStep": 100,
+        "trains": 22,
+        "chance": 0.18,
+        "desc": "Vô hạn kim đan nở rộ, sinh hài nhi thần.",
+        "locked": false
+      },
+      {
+        "id": "hoa_than",
+        "name": "Hóa Thần",
+        "emoji": "🔱",
+        "cap": 2,
+        "color": "#f87171",
+        "layer": 6,
+        "b0": 0,
+        "bStep": 200,
+        "growth": 1.5,
+        "tierNames": [
+          "Sơ kỳ",
+          "Trung kỳ",
+          "Hậu kỳ",
+          "Đại viên mãn"
+        ],
+        "expB0": 0,
+        "expStep": 130,
+        "trains": 22,
+        "chance": 0.16,
+        "desc": "Thần trong cơ thể lớn lên, bắt đầu tiếp xúc đại thiên.",
+        "locked": false
+      },
+      {
+        "id": "phan_hu",
+        "name": "Phản Hư",
+        "emoji": "🌀",
+        "cap": 2,
+        "color": "#34d399",
+        "layer": 7,
+        "b0": 0,
+        "bStep": 260,
+        "growth": 1.5,
+        "tierNames": [
+          "Sơ kỳ",
+          "Trung kỳ",
+          "Hậu kỳ",
+          "Đại viên mãn"
+        ],
+        "expB0": 0,
+        "expStep": 170,
+        "trains": 24,
+        "chance": 0.14,
+        "desc": "Thần hòa nhập vào vô hạn đại thiên giới trong đa nguyên.",
+        "locked": false
+      },
+      {
+        "id": "do_kiep",
+        "name": "Độ Kiếp",
+        "emoji": "⚡",
+        "cap": 2,
+        "color": "#2dd4bf",
+        "layer": 8,
+        "b0": 0,
+        "bStep": 340,
+        "growth": 1.5,
+        "tierNames": [
+          "Sơ kỳ",
+          "Trung kỳ",
+          "Hậu kỳ",
+          "Đại viên mãn"
+        ],
+        "expB0": 0,
+        "expStep": 220,
+        "trains": 24,
+        "chance": 0.12,
+        "desc": "Vươn tới vô hạn đa nguyên, chưởng khống đa nguyên chư thiên.",
+        "locked": false
+      },
+      {
+        "id": "dai_thua",
+        "name": "Đại Thừa",
+        "emoji": "🕊️",
+        "cap": 2,
+        "color": "#e5e7eb",
+        "layer": 9,
+        "b0": 0,
+        "bStep": 450,
+        "growth": 1.5,
+        "tierNames": [
+          "Sơ kỳ",
+          "Trung kỳ",
+          "Hậu kỳ",
+          "Đại viên mãn"
+        ],
+        "expB0": 0,
+        "expStep": 300,
+        "trains": 26,
+        "chance": 0,
+        "desc": "Chí cao đa nguyên chư thiên, tìm cách siêu thoát thành chân tiên. Tỷ lệ lên cấp 3 luôn là 0… nhưng sẽ luôn là 100 trong 0.",
+        "locked": false
+      },
+      {
+        "id": "chan_tien",
+        "name": "Chân Tiên",
+        "emoji": "🪽",
+        "cap": 3,
+        "color": "#ffffff",
+        "layer": 1000,
+        "b0": 0,
+        "bStep": 0,
+        "growth": 1,
+        "tierNames": [
+          "Thái Sơ"
+        ],
+        "expB0": 0,
+        "expStep": 0,
+        "trains": 1,
+        "chance": 0,
+        "desc": "Cấp 3 — thoát khỏi hỗn độn, về Thái Sơ. Không thể diễn tả, không thể tưởng. Khái niệm không thể vượt trên khái niệm.",
+        "locked": true
+      },
+      {
+        "id": "huyen_tien",
+        "name": "Huyền Tiên",
+        "emoji": "🌠",
+        "cap": 3,
+        "color": "#ffffff",
+        "layer": 2000,
+        "b0": 0,
+        "bStep": 0,
+        "growth": 1,
+        "tierNames": [
+          "Thái Sơ"
+        ],
+        "expB0": 0,
+        "expStep": 0,
+        "trains": 1,
+        "chance": 0,
+        "desc": "Cấp 3 — thoát khỏi hỗn độn, về Thái Sơ. Không thể diễn tả, không thể tưởng. Khái niệm không thể vượt trên khái niệm.",
+        "locked": true
+      },
+      {
+        "id": "dia_tien",
+        "name": "Địa Tiên",
+        "emoji": "🏔️",
+        "cap": 3,
+        "color": "#ffffff",
+        "layer": 3000,
+        "b0": 0,
+        "bStep": 0,
+        "growth": 1,
+        "tierNames": [
+          "Thái Sơ"
+        ],
+        "expB0": 0,
+        "expStep": 0,
+        "trains": 1,
+        "chance": 0,
+        "desc": "Cấp 3 — thoát khỏi hỗn độn, về Thái Sơ. Không thể diễn tả, không thể tưởng. Khái niệm không thể vượt trên khái niệm.",
+        "locked": true
+      },
+      {
+        "id": "kim_tien",
+        "name": "Kim Tiên",
+        "emoji": "🪙",
+        "cap": 3,
+        "color": "#ffffff",
+        "layer": 4000,
+        "b0": 0,
+        "bStep": 0,
+        "growth": 1,
+        "tierNames": [
+          "Thái Sơ"
+        ],
+        "expB0": 0,
+        "expStep": 0,
+        "trains": 1,
+        "chance": 0,
+        "desc": "Cấp 3 — thoát khỏi hỗn độn, về Thái Sơ. Không thể diễn tả, không thể tưởng. Khái niệm không thể vượt trên khái niệm.",
+        "locked": true
+      },
+      {
+        "id": "thai_at_kim_tien",
+        "name": "Thái Ất Kim Tiên",
+        "emoji": "🌟",
+        "cap": 3,
+        "color": "#ffffff",
+        "layer": 5000,
+        "b0": 0,
+        "bStep": 0,
+        "growth": 1,
+        "tierNames": [
+          "Thái Sơ"
+        ],
+        "expB0": 0,
+        "expStep": 0,
+        "trains": 1,
+        "chance": 0,
+        "desc": "Cấp 3 — thoát khỏi hỗn độn, về Thái Sơ. Không thể diễn tả, không thể tưởng. Khái niệm không thể vượt trên khái niệm.",
+        "locked": true
+      },
+      {
+        "id": "dai_la",
+        "name": "Đại La",
+        "emoji": "♾️",
+        "cap": 3,
+        "color": "#ffffff",
+        "layer": 6000,
+        "b0": 0,
+        "bStep": 0,
+        "growth": 1,
+        "tierNames": [
+          "Thái Sơ"
+        ],
+        "expB0": 0,
+        "expStep": 0,
+        "trains": 1,
+        "chance": 0,
+        "desc": "Cấp 3 — thoát khỏi hỗn độn, về Thái Sơ. Không thể diễn tả, không thể tưởng. Khái niệm không thể vượt trên khái niệm.",
+        "locked": true
+      }
+    ],
+    "stats": [
+      {
+        "id": "hp",
+        "name": "Sinh Mệnh",
+        "emoji": "❤️",
+        "off": 1,
+        "desc": "Máu"
+      },
+      {
+        "id": "atk",
+        "name": "Công Kích",
+        "emoji": "⚔️",
+        "off": 0,
+        "desc": "Sức tấn công"
+      },
+      {
+        "id": "def",
+        "name": "Phòng Ngự",
+        "emoji": "🛡️",
+        "off": -0.2,
+        "desc": "Giảm sát thương nhận"
+      },
+      {
+        "id": "spd",
+        "name": "Tốc Độ",
+        "emoji": "💨",
+        "off": -0.5,
+        "desc": "Ai ra đòn trước"
+      },
+      {
+        "id": "mp",
+        "name": "Linh Lực",
+        "emoji": "🔷",
+        "off": 0.7,
+        "desc": "Tiêu hao khi dùng khả năng"
+      },
+      {
+        "id": "soul",
+        "name": "Thần Thức",
+        "emoji": "👁️",
+        "off": 0.2,
+        "desc": "Cảm nhận pháp tắc"
+      }
+    ],
+    "abilities": [
+      {
+        "id": "quyen_phap",
+        "name": "Phàm Quyền",
+        "emoji": "👊",
+        "minRealm": 0,
+        "type": "damage",
+        "mult": 0.3,
+        "cost": 0,
+        "cd": 0,
+        "extra": 0,
+        "turns": 0,
+        "layerBoost": 0,
+        "desc": "Đòn cơ bản, không tốn linh lực."
+      },
+      {
+        "id": "cuong_phong_chuong",
+        "name": "Cuồng Phong Chưởng",
+        "emoji": "🌪️",
+        "minRealm": 1,
+        "type": "damage",
+        "mult": 0.7,
+        "cost": 0.05,
+        "cd": 1,
+        "extra": 0,
+        "turns": 0,
+        "layerBoost": 0,
+        "desc": "Chưởng phong của võ giả."
+      },
+      {
+        "id": "tinh_khi_hop_nhat",
+        "name": "Tinh Khí Hợp Nhất",
+        "emoji": "🔥",
+        "minRealm": 2,
+        "type": "damage",
+        "mult": 1.2,
+        "cost": 0.1,
+        "cd": 1,
+        "extra": 0,
+        "turns": 0,
+        "layerBoost": 0,
+        "desc": "Dồn tinh và hậu thiên khí vào một đòn."
+      },
+      {
+        "id": "hau_thien_ho_the",
+        "name": "Hậu Thiên Hộ Thể",
+        "emoji": "🛡️",
+        "minRealm": 2,
+        "type": "shield",
+        "mult": 0,
+        "cost": 0.08,
+        "cd": 3,
+        "extra": 1.5,
+        "turns": 0,
+        "layerBoost": 0,
+        "desc": "Khí hóa giáp hấp thụ sát thương."
+      },
+      {
+        "id": "tam_hoa_tu_dinh",
+        "name": "Tam Hoa Tụ Đỉnh",
+        "emoji": "🌸",
+        "minRealm": 3,
+        "type": "buff",
+        "mult": 0,
+        "cost": 0.1,
+        "cd": 4,
+        "extra": 2,
+        "turns": 3,
+        "layerBoost": 0,
+        "desc": "Công kích tăng mạnh trong 3 lượt."
+      },
+      {
+        "id": "than_chi_hoa",
+        "name": "Thần Chi Hóa",
+        "emoji": "💠",
+        "minRealm": 3,
+        "type": "revive",
+        "mult": 0,
+        "cost": 0,
+        "cd": 0,
+        "extra": 0.5,
+        "turns": 0,
+        "layerBoost": 0,
+        "desc": "Bị động: nhục thân hủy diệt vẫn tái tạo, hồi 50% sinh mệnh (1 lần/trận)."
+      },
+      {
+        "id": "diet_the_nhat_kich",
+        "name": "Diệt Thế Nhất Kích",
+        "emoji": "💥",
+        "minRealm": 3,
+        "type": "damage",
+        "mult": 4,
+        "cost": 0.2,
+        "cd": 2,
+        "extra": 0,
+        "turns": 0,
+        "layerBoost": 0,
+        "desc": "Đòn của kẻ diệt thế."
+      },
+      {
+        "id": "quy_hu",
+        "name": "Quy Hư",
+        "emoji": "🌫️",
+        "minRealm": 4,
+        "type": "dodge",
+        "mult": 0,
+        "cost": 0,
+        "cd": 0,
+        "extra": 0.25,
+        "turns": 0,
+        "layerBoost": 0,
+        "desc": "Bị động: 25% quy về hư, đòn đánh xuyên qua như không."
+      },
+      {
+        "id": "phap_tac_tran_lai",
+        "name": "Pháp Tắc Trải Dài",
+        "emoji": "📜",
+        "minRealm": 4,
+        "type": "pierce",
+        "mult": 2.5,
+        "cost": 0.15,
+        "cd": 2,
+        "extra": 0,
+        "turns": 0,
+        "layerBoost": 0,
+        "desc": "Pháp tắc xuyên giáp, bỏ qua phòng ngự."
+      },
+      {
+        "id": "tieu_thien_chuong_khong",
+        "name": "Tiểu Thiên Chưởng Khống",
+        "emoji": "🌐",
+        "minRealm": 5,
+        "type": "drain",
+        "mult": 6,
+        "cost": 0.25,
+        "cd": 3,
+        "extra": 0.3,
+        "turns": 0,
+        "layerBoost": 0,
+        "desc": "Chưởng khống quy tắc, hút 30% sát thương thành sinh mệnh."
+      },
+      {
+        "id": "truc_co_chan_the",
+        "name": "Trúc Cơ Chân Thể",
+        "emoji": "🏯",
+        "minRealm": 6,
+        "type": "shield",
+        "mult": 0,
+        "cost": 0.2,
+        "cd": 4,
+        "extra": 6,
+        "turns": 0,
+        "layerBoost": 0,
+        "desc": "Thân là tiểu thiên, khiên vô cùng dày."
+      },
+      {
+        "id": "kim_dan_thon_the",
+        "name": "Kim Đan Nuốt Thế",
+        "emoji": "🟡",
+        "minRealm": 7,
+        "type": "drain",
+        "mult": 9,
+        "cost": 0.3,
+        "cd": 3,
+        "extra": 0.4,
+        "turns": 0,
+        "layerBoost": 0,
+        "desc": "Kim đan nuốt trung thiên, hút 40% sát thương."
+      },
+      {
+        "id": "nguyen_anh_hoa_than",
+        "name": "Nguyên Anh Hóa Thân",
+        "emoji": "👶",
+        "minRealm": 8,
+        "type": "buff",
+        "mult": 0,
+        "cost": 0.2,
+        "cd": 5,
+        "extra": 12,
+        "turns": 4,
+        "layerBoost": 0,
+        "desc": "Hài nhi thần xuất thế, công kích tăng 4 lượt."
+      },
+      {
+        "id": "phan_hu_quy_nhat",
+        "name": "Phản Hư Quy Nhất",
+        "emoji": "🌀",
+        "minRealm": 10,
+        "type": "pierce",
+        "mult": 12,
+        "cost": 0.3,
+        "cd": 3,
+        "extra": 0,
+        "turns": 0,
+        "layerBoost": 1,
+        "desc": "Quy nhất đại thiên: xuyên giáp và nhảy lên 1 tầng vô hạn."
+      },
+      {
+        "id": "do_kiep_loi_hai",
+        "name": "Độ Kiếp Lôi Hải",
+        "emoji": "⚡",
+        "minRealm": 11,
+        "type": "damage",
+        "mult": 18,
+        "cost": 0.35,
+        "cd": 3,
+        "extra": 0,
+        "turns": 0,
+        "layerBoost": 1,
+        "desc": "Lôi kiếp của đa nguyên giáng xuống, nhảy 1 tầng vô hạn."
+      },
+      {
+        "id": "dai_thua_sieu_thoat",
+        "name": "Đại Thừa Siêu Thoát",
+        "emoji": "🕊️",
+        "minRealm": 12,
+        "type": "heal",
+        "mult": 0,
+        "cost": 0.3,
+        "cd": 5,
+        "extra": 1,
+        "turns": 0,
+        "layerBoost": 0,
+        "desc": "Siêu thoát vòng sinh tử: hồi đầy sinh mệnh."
+      }
+    ],
+    "menus": [
+      {
+        "id": "main",
+        "name": "Menu chính",
+        "ownerOnly": true,
+        "content": "",
+        "rows": [
+          [
+            {
+              "label": "Trạng thái",
+              "emoji": "📜",
+              "style": "primary",
+              "action": {
+                "type": "cmd",
+                "value": "status"
+              }
+            },
+            {
+              "label": "Tu luyện",
+              "emoji": "🧘",
+              "style": "success",
+              "action": {
+                "type": "cmd",
+                "value": "train"
+              }
+            },
+            {
+              "label": "Đột phá",
+              "emoji": "⚡",
+              "style": "danger",
+              "action": {
+                "type": "cmd",
+                "value": "breakthrough"
+              }
+            }
+          ],
+          [
+            {
+              "label": "Khả năng",
+              "emoji": "🌀",
+              "style": "secondary",
+              "action": {
+                "type": "cmd",
+                "value": "abilities"
+              }
+            },
+            {
+              "label": "Tâm ma",
+              "emoji": "👹",
+              "style": "secondary",
+              "action": {
+                "type": "cmd",
+                "value": "duel"
+              }
+            },
+            {
+              "label": "Bảng xếp hạng",
+              "emoji": "🏆",
+              "style": "secondary",
+              "action": {
+                "type": "cmd",
+                "value": "top"
+              }
+            }
+          ]
+        ],
+        "embed": {
+          "enabled": true,
+          "color": "#8b5cf6",
+          "title": "☯️ Tu Tiên — Menu của {name}",
+          "description": "Cảnh giới hiện tại: {realmEmoji} **{realm}** · {tierName}\nTu vi: `{bar}`\n\n*Đại La ngự trị tại Thái Sơ… còn ngươi, đang ở đâu giữa hỗn độn?*",
+          "fields": [
+            {
+              "name": "❤️ Sinh Mệnh",
+              "value": "{hp}",
+              "inline": true
+            },
+            {
+              "name": "⚔️ Công Kích",
+              "value": "{atk}",
+              "inline": true
+            },
+            {
+              "name": "🛡️ Phòng Ngự",
+              "value": "{def}",
+              "inline": true
+            }
+          ],
+          "footer": {
+            "text": "Cấp {cap} · {tangVoHan}"
+          },
+          "thumbnail": "",
+          "image": "",
+          "author": {
+            "name": "",
+            "icon": ""
+          },
+          "url": ""
+        }
+      },
+      {
+        "id": "status",
+        "name": "Trạng thái",
+        "ownerOnly": true,
+        "content": "",
+        "rows": [
+          [
+            {
+              "label": "Tu luyện",
+              "emoji": "🧘",
+              "style": "success",
+              "action": {
+                "type": "cmd",
+                "value": "train"
+              }
+            },
+            {
+              "label": "Đột phá",
+              "emoji": "⚡",
+              "style": "danger",
+              "action": {
+                "type": "cmd",
+                "value": "breakthrough"
+              }
+            },
+            {
+              "label": "Menu",
+              "emoji": "🏠",
+              "style": "secondary",
+              "action": {
+                "type": "menu",
+                "value": "main"
+              }
+            }
+          ]
+        ],
+        "embed": {
+          "enabled": true,
+          "color": "#60a5fa",
+          "title": "{realmEmoji} {name} — {realm}",
+          "description": "**{tierName}** · cấp {cap}\nTu vi `{bar}` ({expPct}%)\n{exp} / {need}\n\n{statLines}",
+          "fields": [
+            {
+              "name": "🏆 Chiến tích",
+              "value": "Thắng {wins} · Thua {losses}",
+              "inline": true
+            },
+            {
+              "name": "☯️ Đạo ngấn",
+              "value": "{dao}",
+              "inline": true
+            }
+          ],
+          "footer": {
+            "text": "{tangVoHan}"
+          },
+          "thumbnail": "",
+          "image": "",
+          "author": {
+            "name": "",
+            "icon": ""
+          },
+          "url": ""
+        }
+      },
+      {
+        "id": "result",
+        "name": "Kết quả lệnh",
+        "ownerOnly": true,
+        "content": "",
+        "rows": [
+          [
+            {
+              "label": "Tu luyện",
+              "emoji": "🧘",
+              "style": "success",
+              "action": {
+                "type": "cmd",
+                "value": "train"
+              }
+            },
+            {
+              "label": "Trạng thái",
+              "emoji": "📜",
+              "style": "primary",
+              "action": {
+                "type": "cmd",
+                "value": "status"
+              }
+            },
+            {
+              "label": "Menu",
+              "emoji": "🏠",
+              "style": "secondary",
+              "action": {
+                "type": "menu",
+                "value": "main"
+              }
+            }
+          ]
+        ],
+        "embed": {
+          "enabled": true,
+          "color": "#34d399",
+          "title": "{title}",
+          "description": "{result}",
+          "fields": [],
+          "footer": {
+            "text": "{realm} · {tierName} · `{bar}`"
+          },
+          "thumbnail": "",
+          "image": "",
+          "author": {
+            "name": "",
+            "icon": ""
+          },
+          "url": ""
+        }
+      },
+      {
+        "id": "abilities",
+        "name": "Khả năng",
+        "ownerOnly": true,
+        "content": "",
+        "rows": [
+          [
+            {
+              "label": "Trạng thái",
+              "emoji": "📜",
+              "style": "primary",
+              "action": {
+                "type": "cmd",
+                "value": "status"
+              }
+            },
+            {
+              "label": "Menu",
+              "emoji": "🏠",
+              "style": "secondary",
+              "action": {
+                "type": "menu",
+                "value": "main"
+              }
+            }
+          ]
+        ],
+        "embed": {
+          "enabled": true,
+          "color": "#f472b6",
+          "title": "🌀 Khả năng của {name}",
+          "description": "{result}",
+          "fields": [],
+          "footer": {
+            "text": "Dùng !ttkn dùng <id> để chọn khả năng, !ttkn bỏ để dùng tất cả"
+          },
+          "thumbnail": "",
+          "image": "",
+          "author": {
+            "name": "",
+            "icon": ""
+          },
+          "url": ""
+        }
+      }
+    ],
+    "commands": [
+      {
+        "id": "menu",
+        "name": "Menu Tu Tiên",
+        "trigger": "!tt",
+        "matchType": "exact",
+        "type": "menu",
+        "menu": "main",
+        "cooldown": 3,
+        "enabled": true,
+        "replyMode": "reply",
+        "reply": "",
+        "language": "javascript",
+        "code": "",
+        "timeoutMs": 5000
+      },
+      {
+        "id": "status",
+        "name": "Xem trạng thái",
+        "trigger": "!ttc",
+        "matchType": "startsWith",
+        "type": "status",
+        "menu": "status",
+        "cooldown": 3,
+        "enabled": true,
+        "replyMode": "reply",
+        "reply": "",
+        "language": "javascript",
+        "code": "",
+        "timeoutMs": 5000
+      },
+      {
+        "id": "train",
+        "name": "Tu luyện",
+        "trigger": "!ttl",
+        "matchType": "exact",
+        "type": "train",
+        "menu": "result",
+        "cooldown": 10,
+        "enabled": true,
+        "replyMode": "reply",
+        "reply": "",
+        "language": "javascript",
+        "code": "",
+        "timeoutMs": 5000
+      },
+      {
+        "id": "breakthrough",
+        "name": "Đột phá",
+        "trigger": "!ttdp",
+        "matchType": "exact",
+        "type": "breakthrough",
+        "menu": "result",
+        "cooldown": 10,
+        "enabled": true,
+        "replyMode": "reply",
+        "reply": "",
+        "language": "javascript",
+        "code": "",
+        "timeoutMs": 5000
+      },
+      {
+        "id": "abilities",
+        "name": "Khả năng",
+        "trigger": "!ttkn",
+        "matchType": "startsWith",
+        "type": "abilities",
+        "menu": "abilities",
+        "cooldown": 3,
+        "enabled": true,
+        "replyMode": "reply",
+        "reply": "",
+        "language": "javascript",
+        "code": "",
+        "timeoutMs": 5000
+      },
+      {
+        "id": "duel",
+        "name": "Luận bàn (@người hoặc tâm ma)",
+        "trigger": "!ttpk",
+        "matchType": "startsWith",
+        "type": "duel",
+        "menu": "result",
+        "cooldown": 20,
+        "enabled": true,
+        "replyMode": "reply",
+        "reply": "",
+        "language": "javascript",
+        "code": "",
+        "timeoutMs": 5000
+      },
+      {
+        "id": "top",
+        "name": "Bảng xếp hạng",
+        "trigger": "!tttop",
+        "matchType": "exact",
+        "type": "top",
+        "menu": "result",
+        "cooldown": 5,
+        "enabled": true,
+        "replyMode": "reply",
+        "reply": "",
+        "language": "javascript",
+        "code": "",
+        "timeoutMs": 5000
+      },
+      {
+        "id": "ngodao",
+        "name": "Ngộ đạo (ví dụ script)",
+        "trigger": "!ttdao",
+        "matchType": "exact",
+        "type": "script",
+        "menu": "",
+        "cooldown": 30,
+        "enabled": false,
+        "replyMode": "reply",
+        "reply": "",
+        "language": "javascript",
+        "code": "// Lệnh script Tu Tiên. ctx.player = dữ liệu người chơi (đã định dạng), shared.player = bản thô để sửa.\n// Thư viện số vô hạn: const I = require(ctx.libPath);  I.fmt([tầng, log10])\nconst I = require(ctx.libPath);\nconst p = shared.player;               // { realm, tier, exp:[a,b], dao, flags, ... }\np.dao = (p.dao || 0) + 1;              // ngộ đạo: +1 đạo ngấn\nreply('☯️ ' + ctx.user.mention + ' ngộ đạo, đạo ngấn: **' + p.dao + '** (cảnh giới ' + ctx.player.realm + ')');",
+        "timeoutMs": 5000
+      }
+    ]
+  }
 }

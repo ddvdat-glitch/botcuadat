@@ -2,6 +2,7 @@ require('dotenv').config();
 const fs = require('fs'), path = require('path'), express = require('express');
 const { Client, GatewayIntentBits, Events, ButtonBuilder, ButtonStyle, ActionRowBuilder, MessageFlags } = require('discord.js');
 const { runScript, detectRuntimes, runtimeInfo, RUNTIMES } = require('./scriptRunner');
+const tutien = require('./tutien');   // hệ thống Tu Tiên (trang cấu hình ở cổng TUTIEN_PORT)
 
 const DB = path.join(__dirname, 'data.json');
 
@@ -290,6 +291,7 @@ function normalize(raw) {
   };
   d.commands.forEach(c => { fix(c.defaultAction); (c.rules || []).forEach(r => fix(r.action)); });
   d.scripts = Array.isArray(d.scripts) ? d.scripts.map(cleanScript) : seedScripts();
+  d.tutien = tutien.normalize(d.tutien);   // cảnh giới / chỉ số / khả năng / lệnh / menu / người chơi tu tiên
   return d;
 }
 
@@ -746,6 +748,7 @@ async function runUi(sid, ev) {
 
 client.on(Events.InteractionCreate, async i => {
   try {
+    if (i.isButton() && String(i.customId).startsWith('tt:')) return await tutien.onButton(i);   // nút của menu Tu Tiên
     if (!i.isButton() || !String(i.customId).startsWith('sx:')) return;
     const [, sid, kind, ...rest] = i.customId.split(':'), data = rest.join(':');
     const s = db.scripts.find(x => x.id === sid);
@@ -756,6 +759,9 @@ client.on(Events.InteractionCreate, async i => {
     await enqueue(() => runUi(sid, { event: 'button', inter: i, kind: kind === 'e' ? 'e' : 'u', data, channel, channelId: i.channelId, guildId: i.guildId }));
   } catch (e) { log('error', 'interaction: ' + (e.stack || e.message)); }
 });
+
+// ====================== TU TIÊN: nối vào bot ======================
+tutien.init({ db: () => db, saveSoon, saveNow, log, client, runScript, runtimeInfo, matchText, enqueue });
 
 // ====================== SỰ KIỆN ======================
 function logChat(msg) {
@@ -790,6 +796,7 @@ client.on('messageCreate', async msg => {
     logChat(msg);
     rememberMember(msg);
     if (msg.author.bot) { await handleScripts(msg); return; }
+    if (await tutien.onMessage(msg)) return;      // lệnh Tu Tiên (lưu trong data.json > tutien.commands)
     if (await handleScripts(msg)) return;
     await handleCommands(msg);
   } catch (e) { log('error', 'messageCreate: ' + (e.stack || e.message)); }
@@ -880,6 +887,10 @@ if (!process.env.BOT_TEST) {
   log('system', 'Môi trường script: ' + Object.entries(runtimeInfo()).map(([k, v]) => `${k}=${v.ok ? v.version : 'KHÔNG CÓ'}`).join(', '));
   client.login(process.env.DISCORD_TOKEN).catch(e => log('error', 'Đăng nhập Discord thất bại: ' + e.message + (/disallowed intents/i.test(e.message) ? ' → bật MESSAGE CONTENT INTENT (và SERVER MEMBERS INTENT nếu MEMBERS_INTENT=true) ở Developer Portal > Bot.' : '')));
   app.listen(process.env.PORT || 3000, () => log('system', 'Web: http://localhost:' + (process.env.PORT || 3000)));
+  // Cổng thứ 2: trang cấu hình Tu Tiên (cùng mật khẩu, cùng data.json)
+  const TT_PORT = +process.env.TUTIEN_PORT || 3001;
+  if (TT_PORT !== (+process.env.PORT || 3000)) tutien.createApp(PW).listen(TT_PORT, () => log('system', 'Web Tu Tiên: http://localhost:' + TT_PORT));
+  else log('error', 'TUTIEN_PORT trùng PORT -> không mở được trang Tu Tiên, hãy đổi TUTIEN_PORT.');
   const bye = () => { try { saveNow(); } catch {} process.exit(0); };
   process.on('SIGINT', bye); process.on('SIGTERM', bye);
 }
