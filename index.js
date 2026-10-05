@@ -339,6 +339,8 @@ const checkCond = (cd, msg) => {
     case 'mentionId': list = [...msg.mentions.users.keys()]; break;
     case 'channelId': list = [msg.channel.id]; break;
     case 'guildId': list = [msg.guild?.id || '']; break;
+    case 'tienRealmMin': list = tutien.reachedList(msg.author.id); break;   // cảnh giới Tu Tiên đã đạt (số thứ tự hoặc id) — đạt >= giá trị
+
   }
   const hit = vals.some(v => list.includes(v));
   return cd.op === 'not' ? !hit : hit;
@@ -590,6 +592,7 @@ function buildCtx(msg, pa, text = msg.content) {
       isAdmin: !!m?.permissions.has('Administrator'), isOwner: msg.guild?.ownerId === msg.author.id
     },
     mentions: [...msg.mentions.users.values()].map(u => ({ id: u.id, username: u.username, mention: `<@${u.id}>`, bot: !!u.bot })),
+    tutien: tutien.brief(msg.author.id),     // dữ liệu Tu Tiên của người gõ (null nếu chưa chơi)
     channelId: msg.channel.id, guildId: msg.guild?.id || '', guildName: msg.guild?.name || '', messageId: msg.id, now: Date.now()
   };
 }
@@ -718,7 +721,7 @@ function uiCtx(ev) {
       roles: roles.map(r => r.name), roleIds: roles.map(r => r.id),
       isAdmin: !!m?.permissions?.has?.('Administrator'), isOwner: !!u && i?.guild?.ownerId === u.id
     },
-    mentions: [], channelId: ev.channelId || '', guildId: ev.guildId || '', guildName: i?.guild?.name || '', messageId: i?.message?.id || '', now: Date.now(),
+    mentions: [], tutien: u ? tutien.brief(u.id) : null, channelId: ev.channelId || '', guildId: ev.guildId || '', guildName: i?.guild?.name || '', messageId: i?.message?.id || '', now: Date.now(),
     interaction: i ? { customId: ev.data, kind: ev.kind, messageId: i.message?.id || '', userId: u.id } : null,
     timer: ev.event === 'timer' ? { data: ev.data } : null
   };
@@ -761,7 +764,8 @@ client.on(Events.InteractionCreate, async i => {
 });
 
 // ====================== TU TIÊN: nối vào bot ======================
-tutien.init({ db: () => db, saveSoon, saveNow, log, client, runScript, runtimeInfo, matchText, enqueue });
+tutien.init({ db: () => db, saveSoon, saveNow, log, client, runScript, runtimeInfo, matchText, enqueue, scan: scanAll });
+client.on('guildMemberUpdate', (o, n) => tutien.onMemberUpdate(n));   // role đổi -> cập nhật quyền/tự động treo của người chơi tu tiên
 
 // ====================== SỰ KIỆN ======================
 function logChat(msg) {

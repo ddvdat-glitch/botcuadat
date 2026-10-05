@@ -89,6 +89,49 @@ const I = require(ctx.libPath);
 const p = shared.player;               // { realm, tier, exp:[a,b], dao, flags, ... }
 p.dao = (p.dao || 0) + 1;              // ngộ đạo: +1 đạo ngấn
 reply('☯️ ' + ctx.user.mention + ' ngộ đạo, đạo ngấn: **' + p.dao + '** (cảnh giới ' + ctx.player.realm + ')');`;
+const IDLE_CODE = String.raw`// TREO TU LUYỆN — role cấp cao (gán ở trang Tu Tiên › Role & liên kết; role “tự động” khỏi cần gõ lệnh). Gõ: !ttreo (bật / thu hoạch) · !ttreo tat (thu hoạch rồi dừng) · !ttreo xem
+// Không cần bấm "Tu luyện": tu vi tích theo thời gian thực, gõ lệnh là nhận phần đã tích (tự lên tầng).
+const ROLE_IDS = [];          // ID role cấp cao được treo, vd ['123456789012345678']. Admin / chủ server luôn được.
+const ROLE_NAMES = [];        // hoặc theo tên role, vd ['VIP', 'Trưởng lão']
+const INTERVAL_SEC = 60;      // cứ N giây treo = 1 lần tu luyện
+const EFFICIENCY = 1;         // hiệu suất so với bấm tay (1 = bằng, 2 = gấp đôi ...)
+const MAX_HOURS = 8;          // mỗi lần thu hoạch tối đa N giờ (quá giờ thì phần dư mất)
+const MIN_REALM = 0;          // chỉ cho treo từ cảnh giới số mấy (0 = Phàm Nhân, 3 = Luyện Khí Hóa Thần)
+
+const u = ctx.user, p = shared.player;
+const allowed = u.isAdmin || u.isOwner || (ctx.idle && ctx.idle.mode !== 'none') || ROLE_IDS.some(id => u.roleIds.includes(String(id))) || ROLE_NAMES.some(n => u.roles.includes(n));
+if (!allowed) { reply('🔒 ' + u.mention + ' chỉ role cấp cao mới được **treo tu luyện**.'); return; }
+if (ctx.player.realmIdx < MIN_REALM) { reply('🚫 Cần đạt cảnh giới số **' + MIN_REALM + '** trở lên mới được treo.'); return; }
+
+p.flags = p.flags || {};
+const EFF = EFFICIENCY * ((ctx.idle && ctx.idle.mult) || 1);   // hệ số theo role (tab Role & liên kết)
+if (ctx.idle && ctx.idle.mode === 'auto') { const f = p.flags.auto; reply('♾️ ' + u.mention + ' thuộc role **tự động treo**: không cần gõ lệnh, tu vi tự tích theo thời gian (đã tích ≈ **' + Math.floor((f && f.total) || 0) + '** lần tu luyện).'); return; }
+const now = ctx.now, arg = (ctx.args[0] || '').toLowerCase();
+const dur = s => { s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return (h ? h + ' giờ ' : '') + m + ' phút'; };
+const OFF = ['tat', 'tắt', 'off', 'dung', 'dừng', 'stop'], VIEW = ['xem', 'status', 'tt'];
+let idle = p.flags.idle;
+
+function settle() {                         // đổi thời gian đã treo thành số lần tu luyện
+  const capMs = MAX_HOURS * 3600 * 1000, el = Math.max(0, now - idle.last), used = Math.min(el, capMs);
+  const trains = Math.min(5000, used / 1000 / INTERVAL_SEC * EFF);
+  idle.last = now; idle.total = (idle.total || 0) + trains;
+  p.addTrains = trains;
+  return { used, lost: el - used, trains };
+}
+
+if (VIEW.includes(arg)) {
+  if (!idle || !idle.on) reply('💤 Đang **không treo**. Gõ \`!ttreo\` để bắt đầu.');
+  else { const el = Math.min(now - idle.last, MAX_HOURS * 3600000); reply('🧘 Đang treo **' + dur((now - idle.since) / 1000) + '** · chờ thu hoạch ≈ **' + Math.floor(el / 1000 / INTERVAL_SEC * EFF) + '** lần tu luyện (tối đa ' + MAX_HOURS + ' giờ).'); }
+} else if (OFF.includes(arg)) {
+  if (!idle || !idle.on) reply('💤 Ngươi đang không treo.');
+  else { const r = settle(); idle.on = false; reply('🛑 Dừng treo sau **' + dur((now - idle.since) / 1000) + '**. Thu hoạch ≈ **' + Math.floor(r.trains) + '** lần tu luyện.'); }
+} else if (!idle || !idle.on) {
+  p.flags.idle = { on: true, since: now, last: now, total: (idle && idle.total) || 0 };
+  reply('🧘 ' + u.mention + ' bắt đầu **treo tu luyện** (1 lần / ' + INTERVAL_SEC + 's, tối đa ' + MAX_HOURS + ' giờ mỗi lượt thu). Gõ \`!ttreo\` lại để thu hoạch, \`!ttreo tat\` để dừng.');
+} else {
+  const r = settle();
+  reply('🧘 Thu hoạch sau **' + dur(r.used / 1000) + '** treo: ≈ **' + Math.floor(r.trains) + '** lần tu luyện.' + (r.lost > 0 ? '\n⚠️ Quá ' + MAX_HOURS + ' giờ nên mất ' + dur(r.lost / 1000) + '.' : '') + '\nVẫn đang treo — gõ \`!ttreo tat\` để dừng.');
+}`;
 const defaultCommands = () => [
   C_('menu', 'Menu Tu Tiên', '!tt', 'exact', 'menu', 'main', 3),
   C_('status', 'Xem trạng thái', '!ttc', 'startsWith', 'status', 'status', 3),
@@ -97,10 +140,15 @@ const defaultCommands = () => [
   C_('abilities', 'Khả năng', '!ttkn', 'startsWith', 'abilities', 'abilities', 3),
   C_('duel', 'Luận bàn (@người hoặc tâm ma)', '!ttpk', 'startsWith', 'duel', 'result', 20),
   C_('top', 'Bảng xếp hạng', '!tttop', 'exact', 'top', 'result', 5),
+  C_('treo', 'Treo tu luyện (role cấp cao)', '!ttreo', 'startsWith', 'script', 'result', 5, { code: IDLE_CODE }),
   C_('ngodao', 'Ngộ đạo (ví dụ script)', '!ttdao', 'exact', 'script', '', 30, { enabled: false, code: SAMPLE_CODE })
 ];
-const defaultSettings = () => ({ slots: 4, maxRounds: 12, mpRegen: 0.12, trainRandom: 0.25, failLoss: 0.5, dummyScale: 1, duelRewardX: 3, autoCreate: true });
-const defaults = () => ({ v: 1, settings: defaultSettings(), realms: defaultRealms(), stats: defaultStats(), abilities: defaultAbilities(), menus: defaultMenus(), commands: defaultCommands(), players: {}, scriptStore: {} });
+const defaultSettings = () => ({ slots: 4, maxRounds: 12, mpRegen: 0.12, trainRandom: 0.25, failLoss: 0.5, dummyScale: 1, duelRewardX: 3, autoCreate: true, glareGap: 1, glareExpLoss: 0.25 });
+// Tự động treo: người chơi có role (gán ở tab "Role & liên kết") tự tích tu vi theo thời gian, không cần gõ lệnh
+const defaultAuto = () => ({ enabled: true, intervalSec: 60, efficiency: 1, maxHours: 8, tickSec: 60, minRealm: 0, notifyChannelId: '', notifyTierUp: true });
+const defaultAI = () => ({ enabled: true, source: 'script', url: 'http://127.0.0.1:11434/api/chat', model: 'qwen2.5:7b', timeoutMs: 15000, maxChars: 800,
+  prompt: 'Bạn là thuyết thư nhân kể chuyện tiên hiệp. Nhận dữ liệu một trận luận bàn dạng JSON. KẾT QUẢ ĐÃ ĐƯỢC BOT CHỐT: tuyệt đối không đổi người thắng/thua, không bịa thêm kết quả hay con số. Viết 3-5 câu tiếng Việt, văn phong cổ trang tiên hiệp, giàu hình ảnh, nhắc tên các cảnh giới. Nếu kiểu="uy_ap": kẻ cảnh giới cao KHÔNG ra tay, chỉ trừng mắt/uy áp là đối phương chết chắc — mô tả sự áp đảo tuyệt đối, không có giao chiến. Không dùng markdown, không liệt kê, chỉ in ra đoạn văn.' });
+const defaults = () => ({ v: 1, settings: defaultSettings(), realms: defaultRealms(), stats: defaultStats(), abilities: defaultAbilities(), menus: defaultMenus(), commands: defaultCommands(), players: {}, scriptStore: {}, auto: defaultAuto(), ai: defaultAI(), roleLinks: [] });
 
 // ====================== CHUẨN HÓA / KIỂM TRA DỮ LIỆU ======================
 const num = (v, d = 0) => Number.isFinite(+v) && v !== '' && v !== null ? +v : d;
@@ -109,7 +157,7 @@ function cleanRealm(r, i) {
   const names = (Array.isArray(r.tierNames) ? r.tierNames : String(r.tierNames || '').split('\n')).map(s => str(s, 40).trim()).filter(Boolean);
   return { id: slug(r.id || r.name, 'realm' + i), name: str(r.name || 'Cảnh giới ' + i, 60), emoji: str(r.emoji, 12), cap: clamp(r.cap, 0, 3) | 0, color: /^#[0-9a-f]{6}$/i.test(r.color) ? r.color : '#8b5cf6',
     layer: Math.trunc(num(r.layer)), b0: clamp(num(r.b0), -1e300, 1e300), bStep: clamp(num(r.bStep), -1e300, 1e300), growth: clamp(num(r.growth, 1), 0.01, 1e6), tierNames: names.length ? names.slice(0, 60) : ['Tầng 1'],
-    expB0: clamp(num(r.expB0), -1e300, 1e300), expStep: clamp(num(r.expStep), -1e300, 1e300), trains: clamp(num(r.trains, 12), 1, 100000), chance: clamp(num(r.chance), 0, 1), desc: str(r.desc, 600), locked: !!r.locked };
+    expB0: clamp(num(r.expB0), -1e300, 1e300), expStep: clamp(num(r.expStep), -1e300, 1e300), trains: clamp(num(r.trains, 12), 1, 100000), chance: clamp(num(r.chance), 0, 1), desc: str(r.desc, 600), locked: !!r.locked, roleId: str(r.roleId, 30).replace(/\D/g, '') };
 }
 const cleanStat = (s, i) => ({ id: slug(s.id || s.name, 'stat' + i), name: str(s.name || 'Chỉ số', 40), emoji: str(s.emoji, 12), off: clamp(num(s.off), -1e6, 1e6), desc: str(s.desc, 120) });
 const ABTYPES = ['damage', 'pierce', 'drain', 'heal', 'shield', 'buff', 'revive', 'dodge'];
@@ -126,9 +174,14 @@ function cleanMenu(m, i) {
       fields: (Array.isArray(e.fields) ? e.fields : []).slice(0, 25).map(f => ({ name: str(f.name, 256), value: str(f.value, 1024), inline: !!f.inline })) } };
 }
 const CTYPES = ['menu', 'status', 'train', 'breakthrough', 'abilities', 'duel', 'top', 'reply', 'script'];
+const ids = a => (Array.isArray(a) ? a : []).map(x => str(x, 30).replace(/\D/g, '')).filter(Boolean).slice(0, 50);
+const cleanAccess = a => { const x = isObj(a) ? a : {}; return { mode: ['roles', 'staff'].includes(x.mode) ? x.mode : 'all', roleIds: ids(x.roleIds), denyRoleIds: ids(x.denyRoleIds), minRealm: clamp(x.minRealm, 0, 999) | 0 }; };
 const cleanCmd = (c, i) => ({ id: slug(c.id || c.name, 'cmd' + i), name: str(c.name || 'Lệnh', 80), trigger: str(c.trigger, 200), matchType: ['exact', 'startsWith', 'contains', 'regex'].includes(c.matchType) ? c.matchType : 'exact',
-  type: CTYPES.includes(c.type) ? c.type : 'reply', menu: str(c.menu, 40), cooldown: clamp(c.cooldown, 0, 86400), enabled: c.enabled !== false, replyMode: c.replyMode === 'send' ? 'send' : 'reply',
+  type: CTYPES.includes(c.type) ? c.type : 'reply', access: cleanAccess(c.access), menu: str(c.menu, 40), cooldown: clamp(c.cooldown, 0, 86400), enabled: c.enabled !== false, replyMode: c.replyMode === 'send' ? 'send' : 'reply',
   reply: str(c.reply, 2000), language: c.language === 'python' ? 'python' : 'javascript', code: str(c.code, 100000), timeoutMs: clamp(c.timeoutMs || 5000, 500, 15000) });
+const cleanAuto = a => { const d = defaultAuto(), x = isObj(a) ? a : {}; return { enabled: (x.enabled ?? d.enabled) !== false, intervalSec: clamp(num(x.intervalSec, d.intervalSec), 1, 86400), efficiency: clamp(num(x.efficiency, d.efficiency), 0, 1000), maxHours: clamp(num(x.maxHours, d.maxHours), 0.1, 720), tickSec: clamp(num(x.tickSec, d.tickSec), 15, 3600), minRealm: clamp(x.minRealm, 0, 999) | 0, notifyChannelId: str(x.notifyChannelId, 30).replace(/\D/g, ''), notifyTierUp: (x.notifyTierUp ?? d.notifyTierUp) !== false }; };
+const cleanAI = a => { const d = defaultAI(), x = isObj(a) ? a : {}; return { enabled: (x.enabled ?? d.enabled) !== false, source: x.source === 'custom' ? 'custom' : 'script', url: str(x.url || d.url, 300), model: str(x.model || d.model, 100), timeoutMs: clamp(num(x.timeoutMs, d.timeoutMs), 2000, 120000), maxChars: clamp(num(x.maxChars, d.maxChars), 100, 1800), prompt: str(x.prompt || d.prompt, 4000) }; };
+const cleanLink = l => ({ roleId: str(l.roleId, 30).replace(/\D/g, ''), name: str(l.name, 80), idle: ['auto', 'manual'].includes(l.idle) ? l.idle : 'none', mult: clamp(num(l.mult, 1), 0.01, 1000) });
 const uniq = (arr, key = 'id') => { const seen = new Set(); return arr.filter(x => !seen.has(x[key]) && seen.add(x[key])); };
 function cleanConfig(raw, base) {
   const d = defaults(), r = isObj(raw) ? raw : {};
@@ -144,6 +197,9 @@ function cleanConfig(raw, base) {
   out.abilities = Array.isArray(r.abilities) ? uniq(r.abilities.map(cleanAbility)) : d.abilities;
   out.menus = Array.isArray(r.menus) && r.menus.length ? uniq(r.menus.map(cleanMenu)) : d.menus;
   out.commands = Array.isArray(r.commands) ? uniq(r.commands.map(cleanCmd)) : d.commands;
+  out.auto = cleanAuto(r.auto); out.ai = cleanAI(r.ai);
+  out.roleLinks = uniq((Array.isArray(r.roleLinks) ? r.roleLinks : []).map(cleanLink).filter(l => l.roleId), 'roleId').slice(0, 300);
+  out.settings.glareGap = clamp(out.settings.glareGap, 0, 999) | 0; out.settings.glareExpLoss = clamp(out.settings.glareExpLoss, 0, 1);
   return out;
 }
 function normalize(raw) {
@@ -174,7 +230,7 @@ function getPlayer(uid, name) {
 }
 function playerVars(p, extra = {}) {
   const r = realmAt(p.realm), need = needOf(r, p.tier), st = statsOf(r, p.tier), pct = Math.min(1, I.ratio(p.exp, need));
-  const v = { name: p.name, mention: `<@${p.id}>`, userId: p.id, realm: r.name, realmEmoji: r.emoji, realmId: r.id, cap: r.cap, tier: p.tier, tierName: r.tierNames[p.tier - 1], tangVoHan: tangText(r),
+  const v = { name: p.name, realmIdx: p.realm, mention: `<@${p.id}>`, userId: p.id, realm: r.name, realmEmoji: r.emoji, realmId: r.id, cap: r.cap, tier: p.tier, tierName: r.tierNames[p.tier - 1], tangVoHan: tangText(r),
     exp: I.fmt(p.exp), need: I.fmt(need), expPct: (pct * 100).toFixed(1), bar: I.bar(pct, 12), wins: p.wins, losses: p.losses, dao: p.dao, color: r.color, desc: r.desc };
   const lines = [];
   for (const s of T().stats) { v[s.id] = I.fmt(st[s.id]); lines.push(`${s.emoji} **${s.name}:** ${v[s.id]}`); }
@@ -307,17 +363,72 @@ function duelText(res, a, b) {
   const L = res.lines, shown = L.length > 16 ? [...L.slice(0, 8), `… (${L.length - 14} dòng lược bớt) …`, ...L.slice(-6)] : L;
   return shown.join('\n') + `\n\n🏁 ${res.winner < 0 ? '**Hòa**' : '**' + (res.winner === 0 ? a : b) + '** thắng!'}`;
 }
-function simulate(a, b) {
-  const ra = realmAt(a.realm), rb = realmAt(b.realm), ta = clamp(a.tier, 1, tierCount(ra)) | 0, tb = clamp(b.tier, 1, tierCount(rb)) | 0;
-  const A_ = makeFighter(`${ra.name} ${ra.tierNames[ta - 1]}`, ra, ta, 0, T().abilities, []), B_ = makeFighter(`${rb.name} ${rb.tierNames[tb - 1]}`, rb, tb, 0, T().abilities, []);
-  const res = fight(A_, B_);
-  return { text: duelText(res, A_.name, B_.name), winner: res.winner, stats: { a: Object.fromEntries(Object.entries(A_.st).map(([k, v]) => [k, I.fmt(v)])), b: Object.fromEntries(Object.entries(B_.st).map(([k, v]) => [k, I.fmt(v)])) } };
+const side = (name, r, t) => ({ ten: name, canh_gioi: r.name, tang: r.tierNames[t - 1], cap: r.cap, tang_vo_han: tangText(r) });
+// ---- AI: dùng luôn Ollama của script AI sẵn có (đọc URL/model từ script đó), hoặc cấu hình riêng ----
+function aiConfig() {
+  const AI = T().ai, db = C.db();
+  if (!AI.enabled) return null;
+  if (AI.source === 'script') {
+    const sc = (db.scripts || []).find(x => /OLLAMA_URL/.test(x.code || '') && /api\/chat/.test(x.code || ''));
+    if (sc) {
+      const url = (sc.code.match(/OLLAMA_URL\s*=\s*'([^']+)'/) || [])[1], dm = (sc.code.match(/DEFAULT_MODEL\s*=\s*'([^']+)'/) || [])[1];
+      const model = (db.scriptData?.byScript?.[sc.id] || {}).model || dm;
+      if (url && model) return { url, model, from: 'script “' + sc.name + '”' };
+    }
+  }
+  return { url: AI.url, model: AI.model, from: 'cấu hình riêng' };
 }
-function doDuel(p, cx) {
+async function narrate(info, fallback) {
+  const AI = T().ai, cfg = aiConfig(); if (!cfg) return { text: fallback, ai: false };
+  const ac = new AbortController(), timer = setTimeout(() => ac.abort(), AI.timeoutMs), t0 = Date.now();
+  try {
+    const res = await fetch(cfg.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ac.signal,
+      body: JSON.stringify({ model: cfg.model, stream: false, keep_alive: '30m', options: { temperature: 0.8, top_p: 0.9, num_predict: 420 },
+        messages: [{ role: 'system', content: AI.prompt }, { role: 'user', content: 'Dữ liệu trận (KẾT QUẢ ĐÃ CHỐT, không được đổi):\n' + JSON.stringify(info) }] }) });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    let t = String(((await res.json()).message || {}).content || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/[*_`#>]/g, '').trim();
+    if (t.length > AI.maxChars) { t = t.slice(0, AI.maxChars); const k = Math.max(t.lastIndexOf('.'), t.lastIndexOf('!'), t.lastIndexOf('。')); t = (k > AI.maxChars * 0.5 ? t.slice(0, k + 1) : t + '…'); }
+    if (t.length < 20) throw new Error('AI trả về quá ngắn');
+    return { text: t, ai: true, ms: Date.now() - t0, model: cfg.model, from: cfg.from };
+  } catch (e) {
+    C.log('error', `AI kể trận lỗi (${cfg.url}, ${cfg.model}): ${e.name === 'AbortError' ? 'quá ' + AI.timeoutMs + 'ms' : e.message} -> dùng nhật ký thường`);
+    return { text: fallback, ai: false, error: e.name === 'AbortError' ? 'quá thời gian' : e.message };
+  } finally { clearTimeout(timer); }
+}
+// Chênh >= glareGap cảnh giới: kẻ cao hơn chỉ cần trừng mắt (uy áp) là kẻ thấp chết chắc, không giao chiến.
+async function glare(A_, B_, useAI = true) {
+  const hi = A_.realm >= B_.realm ? A_ : B_, lo = hi === A_ ? B_ : A_, rh = realmAt(hi.realm), rl = realmAt(lo.realm), gap = hi.realm - lo.realm;
+  const info = { kieu: 'uy_ap', chenh_canh_gioi: gap, nguoi_thang: side(hi.name, rh, hi.tier), nguoi_thua: side(lo.name, rl, lo.tier), ket_qua: 'nguoi_thua chet chac chi vi bi trung mat, khong giao chien' };
+  const fb = `👁️ **${hi.name}** (${rh.emoji} ${rh.name}) chỉ khẽ nhướng mắt. Uy áp của cảnh giới cao hơn **${gap}** bậc trùm xuống — **${lo.name}** (${rl.emoji} ${rl.name}) chưa kịp ra tay đã hồn phi phách tán. Cách biệt cảnh giới, không thể vượt qua.`;
+  const n = useAI ? await narrate(info, fb) : { text: fb, ai: false };
+  return { info, hi, lo, gap, text: n.text, ai: n.ai, facts: `\n\n☠️ **${lo.name}** bị uy áp trấn sát (chênh **${gap}** cảnh giới)` };
+}
+async function simulate(a, b, opts = {}) {
+  const ra = realmAt(a.realm), rb = realmAt(b.realm), ta = clamp(a.tier, 1, tierCount(ra)) | 0, tb = clamp(b.tier, 1, tierCount(rb)) | 0;
+  const A_ = { name: `${ra.name} ${ra.tierNames[ta - 1]}`, realm: clamp(a.realm, 0, T().realms.length - 1) | 0, tier: ta }, B_ = { name: `${rb.name} ${rb.tierNames[tb - 1]}`, realm: clamp(b.realm, 0, T().realms.length - 1) | 0, tier: tb };
+  const stats = F => Object.fromEntries(Object.entries(F.st).map(([k, v]) => [k, I.fmt(v)]));
+  const S = T().settings, fa = makeFighter(A_.name, ra, ta, 0, T().abilities, []), fb = makeFighter(B_.name, rb, tb, 0, T().abilities, []);
+  if (S.glareGap > 0 && Math.abs(A_.realm - B_.realm) >= S.glareGap) {
+    const g = await glare(A_, B_, !!opts.ai);
+    return { text: g.text + g.facts, winner: g.hi === A_ ? 0 : 1, glare: true, ai: g.ai, stats: { a: stats(fa), b: stats(fb) } };
+  }
+  const res = fight(fa, fb);
+  return { text: duelText(res, A_.name, B_.name), winner: res.winner, stats: { a: stats(fa), b: stats(fb) } };
+}
+async function doDuel(p, cx) {
   const r = realmAt(p.realm), S = T().settings, target = cx.mentions.find(m => m.id !== p.id && !m.bot);
+  let q = null;
+  if (target) {
+    q = getPlayer(target.id, target.username);
+    if (S.glareGap > 0 && Math.abs(p.realm - q.realm) >= S.glareGap) {                     // ---- UY ÁP ----
+      const g = await glare(p, q), hi = g.hi, lo = g.lo;
+      hi.wins++; lo.losses++; lo.exp = I.scale(lo.exp, 1 - S.glareExpLoss);
+      return { title: '👁️ Uy áp', text: g.text + g.facts + (S.glareExpLoss > 0 ? ` và mất **${Math.round(S.glareExpLoss * 100)}%** tu vi` : '') + '.' };
+    }
+  }
   const mine = makeFighter(p.name, r, p.tier, 0, T().abilities, p.equipped);
-  let foe, q = null;
-  if (target) { q = getPlayer(target.id, target.username); const rq = realmAt(q.realm); foe = makeFighter(q.name, rq, q.tier, 0, T().abilities, q.equipped); }
+  let foe;
+  if (q) { const rq = realmAt(q.realm); foe = makeFighter(q.name, rq, q.tier, 0, T().abilities, q.equipped); }
   else foe = makeFighter('Tâm ma của ' + p.name, r, p.tier, Math.log10(S.dummyScale), T().abilities, []);
   const res = fight(mine, foe), won = res.winner === 0;
   let extra = '';
@@ -326,7 +437,13 @@ function doDuel(p, cx) {
     const w = won ? p : q;
     if (w) { const g = gainOf(w, S.duelRewardX * (q ? 1 : 0.5)); const m = addExp(w, g); extra = `\n🎁 ${w.name} nhận **+${I.fmt(g)}** tu vi.` + (m.length ? '\n' + m.join('\n') : ''); }
   }
-  return { title: '⚔️ Luận bàn', text: duelText(res, mine.name, foe.name) + extra };
+  // gửi dữ liệu trận cho AI kể lại (kết quả do bot tính, AI chỉ viết lời)
+  const plain = res.lines.map(l => l.replace(/[*`]/g, '')), log = plain.length > 8 ? [...plain.slice(0, 4), ...plain.slice(-4)] : plain;
+  const info = { kieu: q ? 'dau' : 'tam_ma', ben_a: side(mine.name, r, p.tier), ben_b: side(foe.name, q ? realmAt(q.realm) : r, q ? q.tier : p.tier), so_hiep: new Set(res.lines.map(l => (l.match(/R(\d+)/) || [])[1]).filter(Boolean)).size,
+    ket_qua: res.winner < 0 ? 'hoa' : (res.winner === 0 ? mine.name : foe.name) + ' thang', dien_bien: log };
+  const n = await narrate(info, duelText(res, mine.name, foe.name));
+  const tail = n.ai ? `\n\n🏁 ${res.winner < 0 ? '**Hòa**' : '**' + (won ? mine.name : foe.name) + '** thắng!'}` : '';
+  return { title: '⚔️ Luận bàn', text: n.text + tail + extra };
 }
 function doTop() {
   const arr = Object.values(T().players).sort((a, b) => b.realm - a.realm || b.tier - a.tier || I.cmp(I.norm(b.exp), I.norm(a.exp))).slice(0, 10);
@@ -335,10 +452,85 @@ function doTop() {
   return { title: '🏆 Bảng xếp hạng', text: arr.map((p, i) => { const r = realmAt(p.realm); return `${med[i] || `**${i + 1}.**`} **${p.name}** — ${r.emoji} ${r.name} · ${r.tierNames[p.tier - 1]}`; }).join('\n') };
 }
 
+// ====================== ROLE ↔ TU TIÊN (liên kết với bot thường) ======================
+const roleNameOf = id => { for (const g of Object.values(C.db().roles || {})) { const r = (g.roles || []).find(x => x.id === id); if (r) return r.name; } return id; };
+// Quyền dùng lệnh tu tiên: chung kiểu với điều kiện của bot thường (role, cấm role, admin). Admin/chủ server luôn được.
+function accessOf(cmd, cx, p) {
+  const a = cmd.access; if (!a || cx.isAdmin || cx.isOwner) return null;
+  const mine = cx.roleIds || [];
+  if (a.mode === 'staff') return 'Lệnh này chỉ dành cho Admin / chủ server.';
+  if (a.mode === 'roles' && !(a.roleIds || []).some(id => mine.includes(id))) return 'Cần một trong các role: ' + (a.roleIds || []).map(roleNameOf).join(', ') + '.';
+  if ((a.denyRoleIds || []).some(id => mine.includes(id))) return 'Role của ngươi bị cấm dùng lệnh này.';
+  if (a.minRealm > 0 && p.realm < a.minRealm) return `Cần đạt ${T().realms[Math.min(a.minRealm, T().realms.length - 1)].name} trở lên.`;
+  return null;
+}
+// Chế độ treo của một người theo các role của họ: auto > manual > none; hệ số = lớn nhất trong chế độ cao nhất
+function idleInfo(roleIds = []) {
+  let mode = 'none', mult = 1;
+  for (const l of T().roleLinks || []) {
+    if (l.idle === 'none' || !roleIds.includes(l.roleId)) continue;
+    if (l.idle === 'auto' && mode !== 'auto') { mode = 'auto'; mult = l.mult; }
+    else if (l.idle === mode) mult = Math.max(mult, l.mult);
+    else if (mode === 'none') { mode = l.idle; mult = l.mult; }
+  }
+  return { mode, mult };
+}
+const trackWho = (p, cx) => { if (cx.guildId) p.gid = cx.guildId; if (cx.roleIds) p.roleIds = cx.roleIds.slice(0, 100); p.staff = !!(cx.isAdmin || cx.isOwner); };
+function onMemberUpdate(m) {                       // role đổi -> cập nhật cho người chơi đã có
+  try { const p = T()?.players?.[m.id]; if (!p) return; p.gid = m.guild.id; p.roleIds = [...m.roles.cache.keys()].filter(id => id !== m.guild.id); C.saveSoon(); } catch { /* bỏ qua */ }
+}
+// Role Discord theo cảnh giới (realm.roleId): đạt cảnh giới -> nhận role đó, gỡ role các cảnh giới khác
+async function syncRealmRole(p, gid) {
+  const rs = T().realms, all = rs.map(r => r.roleId).filter(Boolean), target = rs[p.realm]?.roleId;
+  if (!all.length || !gid) return;
+  const g = C.client.guilds.cache.get(gid), m = g && await g.members.fetch(p.id).catch(() => null); if (!m) return;
+  try {
+    if (target && !m.roles.cache.has(target)) await m.roles.add(target, 'Tu tiên: đạt cảnh giới ' + rs[p.realm].name);
+    const rm = all.filter(id => id !== target && m.roles.cache.has(id)); if (rm.length) await m.roles.remove(rm, 'Tu tiên: đổi cảnh giới');
+    p.roleIds = [...m.roles.cache.keys()].filter(id => id !== gid);
+  } catch (e) { C.log('error', `Tu tiên: không đổi được role cho ${p.name}: ${e.message} (role của bot phải cao hơn role cảnh giới)`); }
+}
+// Tóm tắt cho bot thường: ctx.tutien trong script + điều kiện "cảnh giới tu tiên tối thiểu"
+function brief(uid) {
+  const p = T()?.players?.[uid]; if (!p) return null; const r = realmAt(p.realm);
+  return { realmIdx: p.realm, realm: r.name, realmId: r.id, cap: r.cap, tier: p.tier, tierName: r.tierNames[p.tier - 1] || '', exp: I.fmt(p.exp), wins: p.wins || 0, losses: p.losses || 0, dao: p.dao || 0, idle: idleInfo(p.roleIds).mode };
+}
+const reachedList = uid => { const p = T()?.players?.[uid]; return p ? Array.from({ length: p.realm + 1 }, (_, i) => String(i)).concat([realmAt(p.realm).id]) : []; };
+
+// ====================== TỰ ĐỘNG TREO ======================
+let lastTick = 0, ticking = false;
+async function autoTick() {
+  const A = T()?.auto; if (!A || !A.enabled || ticking || !C.client.isReady()) return;
+  const now = Date.now(); if (now - lastTick < A.tickSec * 1000) return;
+  ticking = true; lastTick = now;
+  try {
+    const notes = []; let changed = false;
+    for (const p0 of Object.values(T().players)) {
+      const p = getPlayer(p0.id), info = idleInfo(p.roleIds);
+      if (info.mode !== 'auto' || p.realm < A.minRealm) { if (p.flags.auto) { delete p.flags.auto; changed = true; } continue; }
+      const f = p.flags.auto = p.flags.auto || { since: now, last: now, total: 0 };
+      const el = Math.min(Math.max(0, now - f.last), A.maxHours * 3600000); f.last = now;
+      const exact = el / 1000 / A.intervalSec * A.efficiency * info.mult, n = Math.min(5000, Math.floor(exact) + (Math.random() < exact % 1 ? 1 : 0));
+      if (n <= 0) continue;
+      f.total = (f.total || 0) + n; changed = true;
+      const seen = new Set(), up = [];
+      for (let k = 0; k < n; k++) for (const m of addExp(p, gainOf(p))) if (!seen.has(m)) { seen.add(m); up.push(m); }
+      const full = p.realm + ':' + p.tier;
+      for (const m of up) { if (m.startsWith('🌟')) { if (f.full === full) continue; f.full = full; } notes.push(`**${p.name}** ${m}`); }
+    }
+    if (changed) C.saveSoon();
+    if (A.notifyChannelId && A.notifyTierUp && notes.length) {
+      const ch = await C.client.channels.fetch(A.notifyChannelId).catch(() => null);
+      if (ch && ch.send) await ch.send({ content: '♾️ **Tự động treo**\n' + notes.slice(0, 15).join('\n') + (notes.length > 15 ? `\n… và ${notes.length - 15} thông báo khác` : ''), allowedMentions: { parse: [] } }).catch(() => {});
+    }
+  } catch (e) { C.log('error', 'Tự động treo lỗi: ' + (e.stack || e.message)); } finally { ticking = false; }
+}
+
 // ====================== LỆNH & MENU ======================
 const cdMap = new Map();
 async function execCommand(cmd, cx) {
-  const p = getPlayer(cx.uid, cx.username);
+  const p = getPlayer(cx.uid, cx.username), realm0 = p.realm;
+  trackWho(p, cx);
   let res;
   switch (cmd.type) {
     case 'menu': res = { text: '' }; break;
@@ -346,20 +538,21 @@ async function execCommand(cmd, cx) {
     case 'train': res = doTrain(p); break;
     case 'breakthrough': res = doBreak(p); break;
     case 'abilities': res = { text: doEquip(p, cx.args), title: '🌀 Khả năng' }; break;
-    case 'duel': res = doDuel(p, cx); break;
+    case 'duel': res = await doDuel(p, cx); break;
     case 'top': res = doTop(); break;
     case 'reply': res = { text: cmd.reply }; break;
     case 'script': res = await runCmdScript(cmd, cx, p); break;
     default: res = { text: '' };
   }
   C.saveSoon();
+  if (p.realm !== realm0 && cx.guildId) syncRealmRole(p, cx.guildId).catch(() => {});
   const who = res.who || p, v = playerVars(who, { result: res.text || '', title: res.title || cmd.name });
   return { vars: v, menuId: cmd.menu, res };
 }
 async function runCmdScript(cmd, cx, p) {
   const v = playerVars(p), key = cmd.id, store = (T().scriptStore[key] = isObj(T().scriptStore[key]) ? T().scriptStore[key] : {});
-  const ctx = { content: cx.content || '', rest: cx.rest || '', args: cx.args || [], match: [], event: 'message', libPath: path.join(__dirname, 'infnum.js'), player: v,
-    user: { id: cx.uid, username: cx.username, display: cx.display || cx.username, mention: `<@${cx.uid}>`, roles: [], roleIds: [], isAdmin: !!cx.isAdmin, isOwner: !!cx.isOwner },
+  const ctx = { content: cx.content || '', rest: cx.rest || '', args: cx.args || [], match: [], event: 'message', libPath: path.join(__dirname, 'infnum.js'), player: v, idle: idleInfo(cx.roleIds), auto: p.flags.auto || null,
+    user: { id: cx.uid, username: cx.username, display: cx.display || cx.username, mention: `<@${cx.uid}>`, roles: cx.roles || [], roleIds: cx.roleIds || [], isAdmin: !!cx.isAdmin, isOwner: !!cx.isOwner },
     mentions: cx.mentions, channelId: cx.channelId || '', guildId: cx.guildId || '', guildName: '', messageId: '', now: Date.now() };
   const r = await C.enqueue(() => C.runScript(cmd.language, cmd.code, { ctx, store, shared: { player: JSON.parse(JSON.stringify(p)) } }, cmd.timeoutMs));
   if (!r.ok) { C.log('error', `Lệnh tu tiên "${cmd.name}" lỗi:\n${r.error}`, { user: cx.username }); return { text: '⚠️ Script bị lỗi, xem tab Log của bot.', title: cmd.name }; }
@@ -370,8 +563,16 @@ async function runCmdScript(cmd, cx, p) {
     p.dao = clamp(sp.dao, 0, 1e15); p.wins = clamp(sp.wins, 0, 1e15) | 0; p.losses = clamp(sp.losses, 0, 1e15) | 0;
     if (Array.isArray(sp.equipped)) p.equipped = sp.equipped.map(String).slice(0, 25); if (isObj(sp.flags)) p.flags = JSON.parse(JSON.stringify(sp.flags).slice(0, 20000) || '{}');
   }
-  return { text: (r.out?.replies || []).join('\n'), title: cmd.name };
+  // Script có thể xin cộng N lần "tu luyện": shared.player.addTrains = N  (bot tự tính tu vi, tự lên tầng)
+  let extra = [];
+  const n = clamp(sp && sp.addTrains, 0, 5000);
+  if (n > 0) {
+    const whole = Math.floor(n) + (Math.random() < n % 1 ? 1 : 0), seen = new Set();
+    for (let k = 0; k < whole; k++) for (const m of addExp(p, gainOf(p))) if (!seen.has(m)) { seen.add(m); extra.push(m); }
+  }
+  return { text: [...(r.out?.replies || []), ...extra.slice(0, 10)].join('\n'), title: cmd.name };
 }
+const rolesOf = m => { const rs = m?.roles?.cache ? [...m.roles.cache.values()].filter(r => r.name !== '@everyone') : []; return { roles: rs.map(r => r.name), roleIds: rs.map(r => r.id) }; };
 const HEX = c => parseInt(String(c).replace('#', ''), 16) || 0x8b5cf6;
 const okUrl = u => /^https?:\/\/\S+$/i.test(u);
 function buildPayload(menu, v, uid) {
@@ -429,8 +630,11 @@ async function onMessage(msg) {
     cdMap.set(key, Date.now());
     const rest = cmd.matchType === 'startsWith' ? text.slice(cmd.trigger.trim().length).trim() : '';
     const cx = { uid: msg.author.id, username: msg.author.username, display: msg.member?.displayName, content: text, rest, args: rest ? rest.split(/\s+/) : [], mentions: [...msg.mentions.users.values()].map(u => ({ id: u.id, username: u.username, bot: !!u.bot })),
-      channelId: msg.channelId, guildId: msg.guild?.id || '', isAdmin: !!msg.member?.permissions.has('Administrator'), isOwner: msg.guild?.ownerId === msg.author.id };
+      ...rolesOf(msg.member), channelId: msg.channelId, guildId: msg.guild?.id || '', isAdmin: !!msg.member?.permissions.has('Administrator'), isOwner: msg.guild?.ownerId === msg.author.id };
+    const deny = accessOf(cmd, cx, getPlayer(cx.uid, cx.username));
+    if (deny) { await msg.reply({ content: '🔒 ' + deny, allowedMentions: { parse: [] } }).catch(() => {}); return true; }
     C.log('cmd', `Tu tiên: lệnh "${cmd.name}" (${cmd.type})`, { user: msg.author.username });
+    if (cmd.type === 'duel') msg.channel.sendTyping?.().catch(() => {});
     try {
       const out = await execCommand(cmd, cx), payload = cmdPayload(out, msg.author.id);
       const sent = cmd.replyMode === 'send' ? await msg.channel.send(payload) : await msg.reply(payload);
@@ -459,7 +663,10 @@ async function onButton(i) {
     const key = cmd.id + ':' + uid, last = cdMap.get(key) || 0;
     if (cmd.cooldown > 0 && Date.now() - last < cmd.cooldown * 1000) return i.followUp({ content: `⏳ Chờ ${Math.ceil((cmd.cooldown * 1000 - (Date.now() - last)) / 1000)}s nữa.`, flags: D.MessageFlags.Ephemeral });
     cdMap.set(key, Date.now());
-    const out = await execCommand(cmd, { uid, username: i.user.username, display: i.member?.displayName, content: '', rest: '', args: [], mentions: [], channelId: i.channelId, guildId: i.guildId || '', isAdmin: !!i.member?.permissions?.has?.('Administrator'), isOwner: i.guild?.ownerId === uid });
+    const cx = { uid, username: i.user.username, display: i.member?.displayName, content: '', rest: '', args: [], mentions: [], ...rolesOf(i.member), channelId: i.channelId, guildId: i.guildId || '', isAdmin: !!i.member?.permissions?.has?.('Administrator'), isOwner: i.guild?.ownerId === uid };
+    const deny = accessOf(cmd, cx, getPlayer(uid, i.user.username));
+    if (deny) return i.followUp({ content: '🔒 ' + deny, flags: D.MessageFlags.Ephemeral });
+    const out = await execCommand(cmd, cx);
     await send(cmdPayload(out, anyone ? 'any' : uid));
   } catch (e) { C.log('error', 'Tu tiên nút: ' + (e.stack || e.message)); send({ content: '⚠️ Lỗi, xem tab Log của bot.', components: [], embeds: [] }).catch(() => {}); }
 }
@@ -473,19 +680,25 @@ function createApp(password) {
   app.use('/api', (req, res, next) => password && req.headers['x-password'] === password ? next() : res.status(401).json({ error: 'Sai mật khẩu' }));
   const pub = () => { const t = T(); const { scriptStore, ...rest } = t; return { ...rest, players: undefined }; };
 
-  app.get('/api/tt', (req, res) => { const db = C.db(); res.json({ tutien: pub(), channels: db.channels, runtimes: C.runtimeInfo(), ctypes: CTYPES, abtypes: ABTYPES, botReady: C.client.isReady() }); });
+  app.get('/api/tt', (req, res) => { const db = C.db(); res.json({ tutien: pub(), channels: db.channels, roles: db.roles, aiInfo: aiConfig(), runtimes: C.runtimeInfo(), ctypes: CTYPES, abtypes: ABTYPES, botReady: C.client.isReady() }); });
+  app.post('/api/tt/rescan', async (req, res) => { try { await C.scan(); const db = C.db(); res.json({ roles: db.roles, channels: db.channels }); } catch (e) { res.status(500).json({ error: e.message }); } });
+  app.post('/api/tt/ai-test', async (req, res) => {
+    const cfg = aiConfig(); if (!cfg) return res.json({ ok: false, text: 'AI đang tắt trong cấu hình.' });
+    const info = { kieu: 'uy_ap', chenh_canh_gioi: 1, nguoi_thang: side('Lão Tổ', realmAt(4), 1), nguoi_thua: side('Tiểu Tử', realmAt(3), 9), ket_qua: 'nguoi_thua chet chac chi vi bi trung mat, khong giao chien' };
+    const n = await narrate(info, '(AI không phản hồi)'); res.json({ ok: n.ai, text: n.text, error: n.error, model: cfg.model, url: cfg.url, from: cfg.from, ms: n.ms });
+  });
   app.put('/api/tt', (req, res) => {
     const db = C.db(); db.tutien = cleanConfig(req.body || {}, db.tutien); C.saveNow(); res.json({ ok: true, tutien: pub() });
   });
   app.get('/api/tt/players', (req, res) => res.json(Object.values(T().players).map(p => ({ ...p, expText: I.fmt(p.exp) }))));
   app.put('/api/tt/player/:id', (req, res) => {
-    const p = getPlayer(String(req.params.id).slice(0, 30)), b = req.body || {};
+    const p = getPlayer(String(req.params.id).slice(0, 30)), b = req.body || {}, r0before = p.realm;
     if (b.name != null) p.name = str(b.name, 40);
     if (b.realm != null) p.realm = clamp(b.realm, 0, T().realms.length - 1) | 0;
     p.tier = clamp(b.tier ?? p.tier, 1, tierCount(realmAt(p.realm))) | 0;
     if (b.exp) p.exp = I.norm(b.exp); if (b.dao != null) p.dao = clamp(b.dao, 0, 1e15);
     if (b.reset) { p.realm = 0; p.tier = 1; p.exp = I.ZERO(); p.equipped = []; p.wins = p.losses = 0; }
-    C.saveNow(); res.json({ ok: true });
+    C.saveNow(); res.json({ ok: true }); if (p.realm !== r0before && p.gid) syncRealmRole(p, p.gid).catch(() => {});
   });
   app.delete('/api/tt/player/:id', (req, res) => { delete T().players[req.params.id]; C.saveNow(); res.json({ ok: true }); });
   app.post('/api/tt/vars', (req, res) => {                          // biến mẫu để xem trước menu
@@ -493,7 +706,7 @@ function createApp(password) {
     p.tier = clamp(b.tier, 1, tierCount(realmAt(p.realm))) | 0; p.exp = I.scale(needOf(realmAt(p.realm), p.tier), 0.42);
     res.json(playerVars(p, { result: 'Đây là *nội dung kết quả* của lệnh.\n**Dòng** thứ hai.', title: 'Tiêu đề lệnh' }));
   });
-  app.post('/api/tt/simulate', (req, res) => { const b = req.body || {}; res.json(simulate(b.a || {}, b.b || {})); });
+  app.post('/api/tt/simulate', async (req, res) => { const b = req.body || {}; res.json(await simulate(b.a || {}, b.b || {}, { ai: !!b.ai })); });
   app.post('/api/tt/send-menu', async (req, res) => {
     try {
       const { menuId, channelId } = req.body || {}, menu = menuById(menuId), id = String(channelId || '').match(/\d{15,25}/)?.[0];
@@ -507,5 +720,5 @@ function createApp(password) {
   return app;
 }
 
-function init(ctx) { C = ctx; }
-module.exports = { init, normalize, cleanConfig, defaults, onMessage, onButton, createApp, simulate, fight, makeFighter, playerVars, getPlayer, execCommand, buildPayload, doTrain, doBreak, addExp, statsOf, needOf, realmAt, fill };
+function init(ctx) { C = ctx; const t = setInterval(() => autoTick().catch(() => {}), 30000); if (t.unref) t.unref(); }
+module.exports = { init, onMemberUpdate, brief, reachedList, autoTick, idleInfo, accessOf, syncRealmRole, narrate, aiConfig, glare, doDuel, runCmdScript, normalize, cleanConfig, defaults, onMessage, onButton, createApp, simulate, fight, makeFighter, playerVars, getPlayer, execCommand, buildPayload, doTrain, doBreak, addExp, statsOf, needOf, realmAt, fill };

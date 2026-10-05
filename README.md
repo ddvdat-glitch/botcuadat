@@ -51,3 +51,14 @@ Trang cấu hình mở ở **http://localhost:3001** (đổi bằng `TUTIEN_PORT
 **Số tiến sát vô hạn:** chỉ số là cặp `[a, b] = ∞^a × 10^b` (file `infnum.js`, dùng chung bot và trình duyệt). `b` lên tới 10³⁰⁰ nên từ **Luyện Khí Hóa Thần** chỉ số thực tế dạng `10^(1,000,001)`; từ **Luyện Thần Hoàn Hư** mỗi cảnh giới nhảy 1 tầng ∞ — tầng cao thắng tuyệt đối, đòn từ tầng thấp không chạm được. Cấp 3 (Chân Tiên → Đại La) bị khóa: tỉ lệ lên = 0, mỗi lần thử ở Đại Thừa chỉ tăng đạo ngấn.
 
 **Script cho lệnh tu tiên:** ngoài `ctx`, `store`, `reply(...)`, script có `ctx.player` (biến đã định dạng), `shared.player` (bản thô, sửa được `realm`, `tier`, `exp`, `dao`, `equipped`, `flags`) và `const I = require(ctx.libPath)` để tính số vô hạn (`I.fmt`, `I.add`, `I.mul`, `I.cmp`…).
+
+## 🔗 Liên kết bot thường ↔ Tu Tiên (bản cập nhật)
+- **Role dùng chung:** trang Tu Tiên đọc danh sách role do bot thường quét (`data.json › roles`). Tab **Role & liên kết**: mỗi role chọn *Treo* = Tự động / Thủ công (`!ttreo`) và hệ số nhân.
+- **Tự động treo:** người có role "Tự động" tự tích tu vi theo thời gian (mặc định 60 giây = 1 lần tu luyện), có bù khi bot tắt (tối đa `maxHours`), có thể báo lên tầng vào một kênh. Người chơi cần gõ một lệnh Tu Tiên ít nhất một lần để bot biết role của họ; role đổi thì bot cập nhật (cần bật SERVER MEMBERS INTENT để nhận sự kiện đổi role ngay).
+- **Quyền lệnh:** mỗi lệnh Tu Tiên có *Ai được dùng* (mọi người / chỉ role chọn / chỉ Admin), *Role bị cấm*, *Cảnh giới tối thiểu*. Admin / chủ server (theo quyền Discord của bot thường) luôn được dùng.
+- **Role theo cảnh giới:** mỗi cảnh giới có thể gán một role Discord; đột phá xong bot tự cấp role mới và gỡ role cảnh giới cũ (role của bot phải cao hơn các role đó).
+- **Ngược lại:** script/lệnh của bot thường có `ctx.tutien` (cảnh giới, tầng, chế độ treo… của người gõ) và điều kiện mới **“Cảnh giới Tu Tiên đạt tối thiểu”** trong luật lệnh.
+
+## ⚔️ PvP: uy áp + AI kể trận
+- Hai người PvP chênh **≥ 1 cảnh giới** (đổi ở Cài đặt): bên cao chỉ cần trừng mắt, bên thấp **chết chắc** (mất % tu vi), không giao chiến. Cùng cảnh giới hoặc đánh tâm ma vẫn mô phỏng trận.
+- Bot tự **tính kết quả** (số siêu lớn mô hình ngôn ngữ không tính được), rồi **gửi dữ liệu trận cho AI Ollama sẵn có** (lấy URL/model từ script AI, đổi bằng `!ai model …` là áp dụng) để viết lời kể và hiển thị. AI lỗi/chậm thì dùng nhật ký thường. Tab Cài đặt có nút thử AI.

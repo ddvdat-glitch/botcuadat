@@ -105,8 +105,8 @@ function drawCmd(){
    <button class="d" onclick="del('commands',${i})">Xóa lệnh</button></div>`;
   (c.rules||[]).forEach((r,j)=>{const R=`${P}.rules.${j}`;
    h+=`<div class="rule"><b>Nếu</b> (tất cả điều kiện đúng):`;
-   r.conditions.forEach((cd,k)=>h+=`<div class="r">${SR(`${R}.conditions.${k}.type`,cd.type,[['userId','ID người dùng'],['username','Tên người dùng'],['mentionId','ID người được @tag trong tin'],['roleId','ID role'],['roleName','Tên role'],['channelId','ID kênh'],['guildId','ID server']])}
-     ${SEL(`${R}.conditions.${k}.op`,cd.op,[['is','là'],['not','KHÔNG là']])}${I(`${R}.conditions.${k}.value`,cd.value,'f')}${PK(KIND[cd.type]||'user',`${R}.conditions.${k}.value`,'append')}<button class="d" onclick="del('${R}.conditions',${k})">x</button></div>`);
+   r.conditions.forEach((cd,k)=>h+=`<div class="r">${SR(`${R}.conditions.${k}.type`,cd.type,[['userId','ID người dùng'],['username','Tên người dùng'],['mentionId','ID người được @tag trong tin'],['roleId','ID role'],['roleName','Tên role'],['channelId','ID kênh'],['guildId','ID server'],['tienRealmMin','☯ Cảnh giới Tu Tiên đạt tối thiểu (số)']])}
+     ${SEL(`${R}.conditions.${k}.op`,cd.op,[['is','là'],['not','KHÔNG là']])}${I(`${R}.conditions.${k}.value`,cd.value,'f')}${cd.type==='tienRealmMin'?'<span class="mu">số thứ tự cảnh giới ở trang Tu Tiên (vd 3 = Luyện Khí Hóa Thần)</span>':PK(KIND[cd.type]||'user',`${R}.conditions.${k}.value`,'append')}<button class="d" onclick="del('${R}.conditions',${k})">x</button></div>`);
    h+=`<button class="s" onclick="add('${R}.conditions',{type:'userId',op:'is',value:''})">+ điều kiện</button> <span class="mu">nhiều giá trị ngăn bằng dấu phẩy = một trong số đó</span>
     <label>Trả lời (mỗi dòng 1 cách):</label>${TA(R+'.replies',r.replies)}${ACT(R+'.action',r.action)}
     <div class="r"><span class="mu">Tự xóa sau (giây, 0 = theo lệnh):</span>${N(R+'.deleteAfter',r.deleteAfter)}</div>

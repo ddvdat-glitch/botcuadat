@@ -300,7 +300,9 @@
       "failLoss": 0.5,
       "dummyScale": 1,
       "duelRewardX": 3,
-      "autoCreate": true
+      "autoCreate": true,
+      "glareGap": 1,
+      "glareExpLoss": 0.25
     },
     "realms": [
       {
@@ -321,7 +323,8 @@
         "trains": 8,
         "chance": 0.9,
         "desc": "Sinh linh thường. Không thể dẫn dắt hậu thiên khí.",
-        "locked": false
+        "locked": false,
+        "roleId": ""
       },
       {
         "id": "vo_gia",
@@ -349,7 +352,8 @@
         "trains": 10,
         "chance": 0.75,
         "desc": "Mạnh gấp trăm lần phàm nhân vẫn chỉ là cấp 0, không điều khiển được hậu thiên khí.",
-        "locked": false
+        "locked": false,
+        "roleId": ""
       },
       {
         "id": "luyen_tinh_hoa_khi",
@@ -377,7 +381,8 @@
         "trains": 12,
         "chance": 0.6,
         "desc": "Dẫn hậu thiên chi khí vào thân, mài giũa hòa với tinh. Mạnh nhất có thể diệt quốc.",
-        "locked": false
+        "locked": false,
+        "roleId": ""
       },
       {
         "id": "luyen_khi_hoa_than",
@@ -405,7 +410,8 @@
         "trains": 14,
         "chance": 0.45,
         "desc": "Gộp tam hoa ngũ khí thành một, sinh ra Thần. Hủy nhục thân dễ dàng tái tạo. Diệt thế giả — chỉ số đã tiến sát vô hạn.",
-        "locked": false
+        "locked": false,
+        "roleId": ""
       },
       {
         "id": "luyen_than_hoan_hu",
@@ -428,7 +434,8 @@
         "trains": 16,
         "chance": 0.3,
         "desc": "Thần quy về Hư, hòa thiên địa, cảm nhận pháp tắc. Từ đây mỗi tiểu cảnh giới cách nhau VÔ HẠN.",
-        "locked": false
+        "locked": false,
+        "roleId": ""
       },
       {
         "id": "luyen_hu_hop_dao",
@@ -451,7 +458,8 @@
         "trains": 18,
         "chance": 0.25,
         "desc": "Chưởng khống, sáng tạo, hủy diệt toàn bộ tiểu thiên. Toàn năng trong giới nhưng chưa toàn tri.",
-        "locked": false
+        "locked": false,
+        "roleId": ""
       },
       {
         "id": "truc_co",
@@ -474,7 +482,8 @@
         "trains": 20,
         "chance": 0.2,
         "desc": "Tự thân là tiểu thiên, kẻ chưởng khống trung thiên.",
-        "locked": false
+        "locked": false,
+        "roleId": ""
       },
       {
         "id": "kim_dan",
@@ -497,7 +506,8 @@
         "trains": 20,
         "chance": 0.2,
         "desc": "Ép trung thiên vô hạn thành kim đan, thai nghén thần mới. Diệt thế trung thiên.",
-        "locked": false
+        "locked": false,
+        "roleId": ""
       },
       {
         "id": "nguyen_anh",
@@ -520,7 +530,8 @@
         "trains": 22,
         "chance": 0.18,
         "desc": "Vô hạn kim đan nở rộ, sinh hài nhi thần.",
-        "locked": false
+        "locked": false,
+        "roleId": ""
       },
       {
         "id": "hoa_than",
@@ -543,7 +554,8 @@
         "trains": 22,
         "chance": 0.16,
         "desc": "Thần trong cơ thể lớn lên, bắt đầu tiếp xúc đại thiên.",
-        "locked": false
+        "locked": false,
+        "roleId": ""
       },
       {
         "id": "phan_hu",
@@ -566,7 +578,8 @@
         "trains": 24,
         "chance": 0.14,
         "desc": "Thần hòa nhập vào vô hạn đại thiên giới trong đa nguyên.",
-        "locked": false
+        "locked": false,
+        "roleId": ""
       },
       {
         "id": "do_kiep",
@@ -589,7 +602,8 @@
         "trains": 24,
         "chance": 0.12,
         "desc": "Vươn tới vô hạn đa nguyên, chưởng khống đa nguyên chư thiên.",
-        "locked": false
+        "locked": false,
+        "roleId": ""
       },
       {
         "id": "dai_thua",
@@ -612,7 +626,8 @@
         "trains": 26,
         "chance": 0,
         "desc": "Chí cao đa nguyên chư thiên, tìm cách siêu thoát thành chân tiên. Tỷ lệ lên cấp 3 luôn là 0… nhưng sẽ luôn là 100 trong 0.",
-        "locked": false
+        "locked": false,
+        "roleId": ""
       },
       {
         "id": "chan_tien",
@@ -632,7 +647,8 @@
         "trains": 1,
         "chance": 0,
         "desc": "Cấp 3 — thoát khỏi hỗn độn, về Thái Sơ. Không thể diễn tả, không thể tưởng. Khái niệm không thể vượt trên khái niệm.",
-        "locked": true
+        "locked": true,
+        "roleId": ""
       },
       {
         "id": "huyen_tien",
@@ -652,7 +668,8 @@
         "trains": 1,
         "chance": 0,
         "desc": "Cấp 3 — thoát khỏi hỗn độn, về Thái Sơ. Không thể diễn tả, không thể tưởng. Khái niệm không thể vượt trên khái niệm.",
-        "locked": true
+        "locked": true,
+        "roleId": ""
       },
       {
         "id": "dia_tien",
@@ -672,7 +689,8 @@
         "trains": 1,
         "chance": 0,
         "desc": "Cấp 3 — thoát khỏi hỗn độn, về Thái Sơ. Không thể diễn tả, không thể tưởng. Khái niệm không thể vượt trên khái niệm.",
-        "locked": true
+        "locked": true,
+        "roleId": ""
       },
       {
         "id": "kim_tien",
@@ -692,7 +710,8 @@
         "trains": 1,
         "chance": 0,
         "desc": "Cấp 3 — thoát khỏi hỗn độn, về Thái Sơ. Không thể diễn tả, không thể tưởng. Khái niệm không thể vượt trên khái niệm.",
-        "locked": true
+        "locked": true,
+        "roleId": ""
       },
       {
         "id": "thai_at_kim_tien",
@@ -712,7 +731,8 @@
         "trains": 1,
         "chance": 0,
         "desc": "Cấp 3 — thoát khỏi hỗn độn, về Thái Sơ. Không thể diễn tả, không thể tưởng. Khái niệm không thể vượt trên khái niệm.",
-        "locked": true
+        "locked": true,
+        "roleId": ""
       },
       {
         "id": "dai_la",
@@ -732,7 +752,8 @@
         "trains": 1,
         "chance": 0,
         "desc": "Cấp 3 — thoát khỏi hỗn độn, về Thái Sơ. Không thể diễn tả, không thể tưởng. Khái niệm không thể vượt trên khái niệm.",
-        "locked": true
+        "locked": true,
+        "roleId": ""
       }
     ],
     "stats": [
@@ -1076,6 +1097,18 @@
           "color": "#8b5cf6",
           "title": "☯️ Tu Tiên — Menu của {name}",
           "description": "Cảnh giới hiện tại: {realmEmoji} **{realm}** · {tierName}\nTu vi: `{bar}`\n\n*Đại La ngự trị tại Thái Sơ… còn ngươi, đang ở đâu giữa hỗn độn?*",
+          "url": "",
+          "thumbnail": "",
+          "image": "",
+          "author": {
+            "name": "",
+            "icon": ""
+          },
+          "footer": {
+            "text": "Cấp {cap} · {tangVoHan}",
+            "icon": ""
+          },
+          "timestamp": false,
           "fields": [
             {
               "name": "❤️ Sinh Mệnh",
@@ -1092,17 +1125,7 @@
               "value": "{def}",
               "inline": true
             }
-          ],
-          "footer": {
-            "text": "Cấp {cap} · {tangVoHan}"
-          },
-          "thumbnail": "",
-          "image": "",
-          "author": {
-            "name": "",
-            "icon": ""
-          },
-          "url": ""
+          ]
         }
       },
       {
@@ -1146,6 +1169,18 @@
           "color": "#60a5fa",
           "title": "{realmEmoji} {name} — {realm}",
           "description": "**{tierName}** · cấp {cap}\nTu vi `{bar}` ({expPct}%)\n{exp} / {need}\n\n{statLines}",
+          "url": "",
+          "thumbnail": "",
+          "image": "",
+          "author": {
+            "name": "",
+            "icon": ""
+          },
+          "footer": {
+            "text": "{tangVoHan}",
+            "icon": ""
+          },
+          "timestamp": false,
           "fields": [
             {
               "name": "🏆 Chiến tích",
@@ -1157,17 +1192,7 @@
               "value": "{dao}",
               "inline": true
             }
-          ],
-          "footer": {
-            "text": "{tangVoHan}"
-          },
-          "thumbnail": "",
-          "image": "",
-          "author": {
-            "name": "",
-            "icon": ""
-          },
-          "url": ""
+          ]
         }
       },
       {
@@ -1211,17 +1236,19 @@
           "color": "#34d399",
           "title": "{title}",
           "description": "{result}",
-          "fields": [],
-          "footer": {
-            "text": "{realm} · {tierName} · `{bar}`"
-          },
+          "url": "",
           "thumbnail": "",
           "image": "",
           "author": {
             "name": "",
             "icon": ""
           },
-          "url": ""
+          "footer": {
+            "text": "{realm} · {tierName} · `{bar}`",
+            "icon": ""
+          },
+          "timestamp": false,
+          "fields": []
         }
       },
       {
@@ -1256,17 +1283,19 @@
           "color": "#f472b6",
           "title": "🌀 Khả năng của {name}",
           "description": "{result}",
-          "fields": [],
-          "footer": {
-            "text": "Dùng !ttkn dùng <id> để chọn khả năng, !ttkn bỏ để dùng tất cả"
-          },
+          "url": "",
           "thumbnail": "",
           "image": "",
           "author": {
             "name": "",
             "icon": ""
           },
-          "url": ""
+          "footer": {
+            "text": "Dùng !ttkn dùng <id> để chọn khả năng, !ttkn bỏ để dùng tất cả",
+            "icon": ""
+          },
+          "timestamp": false,
+          "fields": []
         }
       }
     ],
@@ -1277,6 +1306,12 @@
         "trigger": "!tt",
         "matchType": "exact",
         "type": "menu",
+        "access": {
+          "mode": "all",
+          "roleIds": [],
+          "denyRoleIds": [],
+          "minRealm": 0
+        },
         "menu": "main",
         "cooldown": 3,
         "enabled": true,
@@ -1292,6 +1327,12 @@
         "trigger": "!ttc",
         "matchType": "startsWith",
         "type": "status",
+        "access": {
+          "mode": "all",
+          "roleIds": [],
+          "denyRoleIds": [],
+          "minRealm": 0
+        },
         "menu": "status",
         "cooldown": 3,
         "enabled": true,
@@ -1307,6 +1348,12 @@
         "trigger": "!ttl",
         "matchType": "exact",
         "type": "train",
+        "access": {
+          "mode": "all",
+          "roleIds": [],
+          "denyRoleIds": [],
+          "minRealm": 0
+        },
         "menu": "result",
         "cooldown": 10,
         "enabled": true,
@@ -1322,6 +1369,12 @@
         "trigger": "!ttdp",
         "matchType": "exact",
         "type": "breakthrough",
+        "access": {
+          "mode": "all",
+          "roleIds": [],
+          "denyRoleIds": [],
+          "minRealm": 0
+        },
         "menu": "result",
         "cooldown": 10,
         "enabled": true,
@@ -1337,6 +1390,12 @@
         "trigger": "!ttkn",
         "matchType": "startsWith",
         "type": "abilities",
+        "access": {
+          "mode": "all",
+          "roleIds": [],
+          "denyRoleIds": [],
+          "minRealm": 0
+        },
         "menu": "abilities",
         "cooldown": 3,
         "enabled": true,
@@ -1352,6 +1411,12 @@
         "trigger": "!ttpk",
         "matchType": "startsWith",
         "type": "duel",
+        "access": {
+          "mode": "all",
+          "roleIds": [],
+          "denyRoleIds": [],
+          "minRealm": 0
+        },
         "menu": "result",
         "cooldown": 20,
         "enabled": true,
@@ -1367,6 +1432,12 @@
         "trigger": "!tttop",
         "matchType": "exact",
         "type": "top",
+        "access": {
+          "mode": "all",
+          "roleIds": [],
+          "denyRoleIds": [],
+          "minRealm": 0
+        },
         "menu": "result",
         "cooldown": 5,
         "enabled": true,
@@ -1377,11 +1448,38 @@
         "timeoutMs": 5000
       },
       {
+        "id": "treo",
+        "name": "Treo tu luyện (role cấp cao)",
+        "trigger": "!ttreo",
+        "matchType": "startsWith",
+        "type": "script",
+        "access": {
+          "mode": "all",
+          "roleIds": [],
+          "denyRoleIds": [],
+          "minRealm": 0
+        },
+        "menu": "result",
+        "cooldown": 5,
+        "enabled": true,
+        "replyMode": "reply",
+        "reply": "",
+        "language": "javascript",
+        "code": "// TREO TU LUYỆN — role cấp cao (gán ở trang Tu Tiên › Role & liên kết; role “tự động” khỏi cần gõ lệnh). Gõ: !ttreo (bật / thu hoạch) · !ttreo tat (thu hoạch rồi dừng) · !ttreo xem\n// Không cần bấm \"Tu luyện\": tu vi tích theo thời gian thực, gõ lệnh là nhận phần đã tích (tự lên tầng).\nconst ROLE_IDS = [];          // ID role cấp cao được treo, vd ['123456789012345678']. Admin / chủ server luôn được.\nconst ROLE_NAMES = [];        // hoặc theo tên role, vd ['VIP', 'Trưởng lão']\nconst INTERVAL_SEC = 60;      // cứ N giây treo = 1 lần tu luyện\nconst EFFICIENCY = 1;         // hiệu suất so với bấm tay (1 = bằng, 2 = gấp đôi ...)\nconst MAX_HOURS = 8;          // mỗi lần thu hoạch tối đa N giờ (quá giờ thì phần dư mất)\nconst MIN_REALM = 0;          // chỉ cho treo từ cảnh giới số mấy (0 = Phàm Nhân, 3 = Luyện Khí Hóa Thần)\n\nconst u = ctx.user, p = shared.player;\nconst allowed = u.isAdmin || u.isOwner || (ctx.idle && ctx.idle.mode !== 'none') || ROLE_IDS.some(id => u.roleIds.includes(String(id))) || ROLE_NAMES.some(n => u.roles.includes(n));\nif (!allowed) { reply('🔒 ' + u.mention + ' chỉ role cấp cao mới được **treo tu luyện**.'); return; }\nif (ctx.player.realmIdx < MIN_REALM) { reply('🚫 Cần đạt cảnh giới số **' + MIN_REALM + '** trở lên mới được treo.'); return; }\n\np.flags = p.flags || {};\nconst EFF = EFFICIENCY * ((ctx.idle && ctx.idle.mult) || 1);   // hệ số theo role (tab Role & liên kết)\nif (ctx.idle && ctx.idle.mode === 'auto') { const f = p.flags.auto; reply('♾️ ' + u.mention + ' thuộc role **tự động treo**: không cần gõ lệnh, tu vi tự tích theo thời gian (đã tích ≈ **' + Math.floor((f && f.total) || 0) + '** lần tu luyện).'); return; }\nconst now = ctx.now, arg = (ctx.args[0] || '').toLowerCase();\nconst dur = s => { s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return (h ? h + ' giờ ' : '') + m + ' phút'; };\nconst OFF = ['tat', 'tắt', 'off', 'dung', 'dừng', 'stop'], VIEW = ['xem', 'status', 'tt'];\nlet idle = p.flags.idle;\n\nfunction settle() {                         // đổi thời gian đã treo thành số lần tu luyện\n  const capMs = MAX_HOURS * 3600 * 1000, el = Math.max(0, now - idle.last), used = Math.min(el, capMs);\n  const trains = Math.min(5000, used / 1000 / INTERVAL_SEC * EFF);\n  idle.last = now; idle.total = (idle.total || 0) + trains;\n  p.addTrains = trains;\n  return { used, lost: el - used, trains };\n}\n\nif (VIEW.includes(arg)) {\n  if (!idle || !idle.on) reply('💤 Đang **không treo**. Gõ \\`!ttreo\\` để bắt đầu.');\n  else { const el = Math.min(now - idle.last, MAX_HOURS * 3600000); reply('🧘 Đang treo **' + dur((now - idle.since) / 1000) + '** · chờ thu hoạch ≈ **' + Math.floor(el / 1000 / INTERVAL_SEC * EFF) + '** lần tu luyện (tối đa ' + MAX_HOURS + ' giờ).'); }\n} else if (OFF.includes(arg)) {\n  if (!idle || !idle.on) reply('💤 Ngươi đang không treo.');\n  else { const r = settle(); idle.on = false; reply('🛑 Dừng treo sau **' + dur((now - idle.since) / 1000) + '**. Thu hoạch ≈ **' + Math.floor(r.trains) + '** lần tu luyện.'); }\n} else if (!idle || !idle.on) {\n  p.flags.idle = { on: true, since: now, last: now, total: (idle && idle.total) || 0 };\n  reply('🧘 ' + u.mention + ' bắt đầu **treo tu luyện** (1 lần / ' + INTERVAL_SEC + 's, tối đa ' + MAX_HOURS + ' giờ mỗi lượt thu). Gõ \\`!ttreo\\` lại để thu hoạch, \\`!ttreo tat\\` để dừng.');\n} else {\n  const r = settle();\n  reply('🧘 Thu hoạch sau **' + dur(r.used / 1000) + '** treo: ≈ **' + Math.floor(r.trains) + '** lần tu luyện.' + (r.lost > 0 ? '\\n⚠️ Quá ' + MAX_HOURS + ' giờ nên mất ' + dur(r.lost / 1000) + '.' : '') + '\\nVẫn đang treo — gõ \\`!ttreo tat\\` để dừng.');\n}",
+        "timeoutMs": 5000
+      },
+      {
         "id": "ngodao",
         "name": "Ngộ đạo (ví dụ script)",
         "trigger": "!ttdao",
         "matchType": "exact",
         "type": "script",
+        "access": {
+          "mode": "all",
+          "roleIds": [],
+          "denyRoleIds": [],
+          "minRealm": 0
+        },
         "menu": "",
         "cooldown": 30,
         "enabled": false,
@@ -1391,6 +1489,26 @@
         "code": "// Lệnh script Tu Tiên. ctx.player = dữ liệu người chơi (đã định dạng), shared.player = bản thô để sửa.\n// Thư viện số vô hạn: const I = require(ctx.libPath);  I.fmt([tầng, log10])\nconst I = require(ctx.libPath);\nconst p = shared.player;               // { realm, tier, exp:[a,b], dao, flags, ... }\np.dao = (p.dao || 0) + 1;              // ngộ đạo: +1 đạo ngấn\nreply('☯️ ' + ctx.user.mention + ' ngộ đạo, đạo ngấn: **' + p.dao + '** (cảnh giới ' + ctx.player.realm + ')');",
         "timeoutMs": 5000
       }
-    ]
+    ],
+    "auto": {
+      "enabled": true,
+      "intervalSec": 60,
+      "efficiency": 1,
+      "maxHours": 8,
+      "tickSec": 60,
+      "minRealm": 0,
+      "notifyChannelId": "",
+      "notifyTierUp": true
+    },
+    "ai": {
+      "enabled": true,
+      "source": "script",
+      "url": "http://127.0.0.1:11434/api/chat",
+      "model": "qwen2.5:7b",
+      "timeoutMs": 15000,
+      "maxChars": 800,
+      "prompt": "Bạn là thuyết thư nhân kể chuyện tiên hiệp. Nhận dữ liệu một trận luận bàn dạng JSON. KẾT QUẢ ĐÃ ĐƯỢC BOT CHỐT: tuyệt đối không đổi người thắng/thua, không bịa thêm kết quả hay con số. Viết 3-5 câu tiếng Việt, văn phong cổ trang tiên hiệp, giàu hình ảnh, nhắc tên các cảnh giới. Nếu kiểu=\"uy_ap\": kẻ cảnh giới cao KHÔNG ra tay, chỉ trừng mắt/uy áp là đối phương chết chắc — mô tả sự áp đảo tuyệt đối, không có giao chiến. Không dùng markdown, không liệt kê, chỉ in ra đoạn văn."
+    },
+    "roleLinks": []
   }
 }
