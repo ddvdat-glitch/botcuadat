@@ -481,7 +481,7 @@ async function execAction(a, msg) {
 
   // 0) Người gõ có QUYỀN (role) để làm việc này lên người khác không? (Admin / chủ server luôn được)
   const RP = H.requirePerm, need = PERM_OF[a.type];
-  if (need && !selfTarget && RP && RP.enabled) {
+  if (need && !selfTarget && !a.trusted && RP && RP.enabled) {
     const actor0 = msg.member || await guild.members.fetch(msg.author.id).catch(() => null);
     const has = guild.ownerId === msg.author.id || (actor0 && (actor0.permissions.has('Administrator') || actor0.permissions.has(need[0])));
     if (!has) {
@@ -493,7 +493,7 @@ async function execAction(a, msg) {
 
   // 1) So sánh cấp bậc: người gõ lệnh vs đối tượng (bỏ qua khi đối tượng chính là người gõ)
   const pol = POLICY_OF[a.type];
-  if (member && pol && !selfTarget && H.enabled) {
+  if (member && pol && !selfTarget && !a.trusted && H.enabled) {
     const actor = msg.member || await guild.members.fetch(msg.author.id).catch(() => null);
     if (actor) {
       const res = compareRank(guild, actor, member), o = H[pol][res];
@@ -581,21 +581,6 @@ function parseArgs(s, text) {
 const textOf = msg => !msg.author.bot ? (msg.content || '') : [msg.content, ...(msg.embeds || []).flatMap(e => [e.title, e.description, ...(e.fields || []).flatMap(f => [f.name, f.value]), e.footer?.text])]
   .filter(Boolean).join('\n').normalize('NFC');
 
-// ====== BỘ ĐỆM CHAT GẦN ĐÂY THEO KÊNH (để script AI hiểu ngữ cảnh: ctx.recent) ======
-const CHAT_BUF = new Map(); const CHAT_BUF_MAX = 40;
-function rememberChat(msg) {
-  try {
-    let t = (msg.author?.bot ? textOf(msg) : (msg.cleanContent || msg.content || '')).trim();
-    if (msg.attachments?.size) t += ` [+${msg.attachments.size} tệp]`;
-    if (!t.trim()) { if (!msg.embeds?.length) return; t = '[embed]'; }
-    const arr = CHAT_BUF.get(msg.channelId) || [];
-    arr.push({ id: msg.id, userId: msg.author.id, user: msg.member?.displayName || msg.author.username, bot: !!msg.author.bot, self: msg.author.id === client.user?.id, text: t.slice(0, 500), t: msg.createdTimestamp || Date.now() });
-    while (arr.length > CHAT_BUF_MAX) arr.shift();
-    CHAT_BUF.set(msg.channelId, arr);
-  } catch { /* bỏ qua */ }
-}
-const recentOf = (channelId, beforeId) => (CHAT_BUF.get(channelId) || []).filter(m => m.id !== beforeId).slice(-30);
-
 function buildCtx(msg, pa, text = msg.content) {
   const m = msg.member;
   const roles = m ? [...m.roles.cache.values()].filter(r => r.name !== '@everyone') : [];
@@ -608,8 +593,7 @@ function buildCtx(msg, pa, text = msg.content) {
     },
     mentions: [...msg.mentions.users.values()].map(u => ({ id: u.id, username: u.username, mention: `<@${u.id}>`, bot: !!u.bot })),
     tutien: tutien.brief(msg.author.id),     // dữ liệu Tu Tiên của người gõ (null nếu chưa chơi)
-    channelId: msg.channel.id, guildId: msg.guild?.id || '', guildName: msg.guild?.name || '', messageId: msg.id, now: Date.now(),
-    recent: recentOf(msg.channel.id, msg.id)   // các tin gần đây trong kênh (cũ -> mới), không gồm tin đang xử lý
+    channelId: msg.channel.id, guildId: msg.guild?.id || '', guildName: msg.guild?.name || '', messageId: msg.id, now: Date.now()
   };
 }
 
@@ -645,7 +629,7 @@ async function execScript(s, msg, text = msg.content) {
   saveSoon();
   log('script', `"${s.name}" chạy xong ${r.ms}ms` + (r.stdout && r.stdout.trim() ? '\nprint: ' + r.stdout.trim().slice(0, 600) : ''), { user: msg.author.username, channel: chName(msg) });
   await applyScriptOutput(s, msg, r.out || {});
-  if ((r.out?.ui || []).length) await applyUi(s, r.out.ui, { channel: msg.channel, channelId: msg.channel.id, guildId: msg.guild?.id || '' });
+  if ((r.out?.ui || []).length) await applyUi(s, r.out.ui, { channel: msg.channel, channelId: msg.channel.id, guildId: msg.guild?.id || '', msgId: msg.id });
 }
 
 async function applyScriptOutput(s, msg, out) {
@@ -716,10 +700,10 @@ async function applyUi(s, ops, t) {
       } else if (op.type === 'after') {
         if (pendingTimers >= 300) continue;
         pendingTimers++;
-        const sec = clampNum(op.seconds, 1, 600), data = String(op.data ?? ''), channelId = t.channelId, guildId = t.guildId;
+        const sec = clampNum(op.seconds, 1, 600), data = String(op.data ?? ''), channelId = t.channelId, guildId = t.guildId, msgId = t.msgId;
         setTimeout(() => {
           pendingTimers--;
-          enqueue(() => runUi(s.id, { event: 'timer', data, channelId, guildId })).catch(e => log('error', `Hẹn giờ script "${s.name}": ${e.message}`));
+          enqueue(() => runUi(s.id, { event: 'timer', data, channelId, guildId, msgId })).catch(e => log('error', `Hẹn giờ script "${s.name}": ${e.message}`));
         }, sec * 1000);
       }
     } catch (e) { log('error', `ui.${op.type} của "${s.name}": ${e.message}`); }
@@ -737,7 +721,7 @@ function uiCtx(ev) {
       roles: roles.map(r => r.name), roleIds: roles.map(r => r.id),
       isAdmin: !!m?.permissions?.has?.('Administrator'), isOwner: !!u && i?.guild?.ownerId === u.id
     },
-    mentions: [], tutien: u ? tutien.brief(u.id) : null, channelId: ev.channelId || '', guildId: ev.guildId || '', guildName: i?.guild?.name || '', messageId: i?.message?.id || '', now: Date.now(), recent: recentOf(ev.channelId || ''),
+    mentions: [], tutien: u ? tutien.brief(u.id) : null, channelId: ev.channelId || '', guildId: ev.guildId || '', guildName: i?.guild?.name || '', messageId: i?.message?.id || '', now: Date.now(),
     interaction: i ? { customId: ev.data, kind: ev.kind, messageId: i.message?.id || '', userId: u.id } : null,
     timer: ev.event === 'timer' ? { data: ev.data } : null
   };
@@ -763,6 +747,15 @@ async function runUi(sid, ev) {
   let channel = ev.channel;
   if (!channel && ev.channelId) channel = await client.channels.fetch(ev.channelId).catch(() => null);
   await applyUi(s, ops, { channel, inter: ev.inter, kind: ev.kind, channelId: ev.channelId, guildId: ev.guildId });
+  // Hẹn giờ: chạy hành động script yêu cầu (vd AI mute người dùng). Chỉ mute/unmute, tối đa 2, đối tượng phải là ID cụ thể.
+  if (ev.event === 'timer' && ev.msgId && channel && (out.actions || []).length) {
+    const origin = await channel.messages.fetch(ev.msgId).catch(() => null);
+    if (origin) for (const a of out.actions.slice(0, 2)) {
+      if (!['mute', 'unmute'].includes(a.type) || !/^\d{15,25}$/.test(String(a.target))) continue;
+      await execAction({ type: a.type, seconds: clampNum(a.seconds, 1, 60), reason: a.reason || 'AI tự động', target: 'id', targetId: String(a.target), trusted: true }, origin)
+        .catch(e => log('error', 'Hành động AI lỗi: ' + e.message));
+    }
+  }
 }
 
 client.on(Events.InteractionCreate, async i => {
@@ -812,7 +805,6 @@ async function handleCommands(msg) {
 
 client.on('messageCreate', async msg => {
   try {
-    rememberChat(msg);
     if (msg.author.id === client.user?.id) return;
     logChat(msg);
     rememberMember(msg);
