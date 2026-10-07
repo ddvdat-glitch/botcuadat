@@ -581,6 +581,21 @@ function parseArgs(s, text) {
 const textOf = msg => !msg.author.bot ? (msg.content || '') : [msg.content, ...(msg.embeds || []).flatMap(e => [e.title, e.description, ...(e.fields || []).flatMap(f => [f.name, f.value]), e.footer?.text])]
   .filter(Boolean).join('\n').normalize('NFC');
 
+// ====== BỘ ĐỆM CHAT GẦN ĐÂY THEO KÊNH (để script AI hiểu ngữ cảnh: ctx.recent) ======
+const CHAT_BUF = new Map(); const CHAT_BUF_MAX = 40;
+function rememberChat(msg) {
+  try {
+    let t = (msg.author?.bot ? textOf(msg) : (msg.cleanContent || msg.content || '')).trim();
+    if (msg.attachments?.size) t += ` [+${msg.attachments.size} tệp]`;
+    if (!t.trim()) { if (!msg.embeds?.length) return; t = '[embed]'; }
+    const arr = CHAT_BUF.get(msg.channelId) || [];
+    arr.push({ id: msg.id, userId: msg.author.id, user: msg.member?.displayName || msg.author.username, bot: !!msg.author.bot, self: msg.author.id === client.user?.id, text: t.slice(0, 500), t: msg.createdTimestamp || Date.now() });
+    while (arr.length > CHAT_BUF_MAX) arr.shift();
+    CHAT_BUF.set(msg.channelId, arr);
+  } catch { /* bỏ qua */ }
+}
+const recentOf = (channelId, beforeId) => (CHAT_BUF.get(channelId) || []).filter(m => m.id !== beforeId).slice(-30);
+
 function buildCtx(msg, pa, text = msg.content) {
   const m = msg.member;
   const roles = m ? [...m.roles.cache.values()].filter(r => r.name !== '@everyone') : [];
@@ -593,7 +608,8 @@ function buildCtx(msg, pa, text = msg.content) {
     },
     mentions: [...msg.mentions.users.values()].map(u => ({ id: u.id, username: u.username, mention: `<@${u.id}>`, bot: !!u.bot })),
     tutien: tutien.brief(msg.author.id),     // dữ liệu Tu Tiên của người gõ (null nếu chưa chơi)
-    channelId: msg.channel.id, guildId: msg.guild?.id || '', guildName: msg.guild?.name || '', messageId: msg.id, now: Date.now()
+    channelId: msg.channel.id, guildId: msg.guild?.id || '', guildName: msg.guild?.name || '', messageId: msg.id, now: Date.now(),
+    recent: recentOf(msg.channel.id, msg.id)   // các tin gần đây trong kênh (cũ -> mới), không gồm tin đang xử lý
   };
 }
 
@@ -721,7 +737,7 @@ function uiCtx(ev) {
       roles: roles.map(r => r.name), roleIds: roles.map(r => r.id),
       isAdmin: !!m?.permissions?.has?.('Administrator'), isOwner: !!u && i?.guild?.ownerId === u.id
     },
-    mentions: [], tutien: u ? tutien.brief(u.id) : null, channelId: ev.channelId || '', guildId: ev.guildId || '', guildName: i?.guild?.name || '', messageId: i?.message?.id || '', now: Date.now(),
+    mentions: [], tutien: u ? tutien.brief(u.id) : null, channelId: ev.channelId || '', guildId: ev.guildId || '', guildName: i?.guild?.name || '', messageId: i?.message?.id || '', now: Date.now(), recent: recentOf(ev.channelId || ''),
     interaction: i ? { customId: ev.data, kind: ev.kind, messageId: i.message?.id || '', userId: u.id } : null,
     timer: ev.event === 'timer' ? { data: ev.data } : null
   };
@@ -796,6 +812,7 @@ async function handleCommands(msg) {
 
 client.on('messageCreate', async msg => {
   try {
+    rememberChat(msg);
     if (msg.author.id === client.user?.id) return;
     logChat(msg);
     rememberMember(msg);
