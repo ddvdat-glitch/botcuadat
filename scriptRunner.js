@@ -7,7 +7,7 @@ const { spawn, spawnSync } = require('child_process');
 const os = require('os');
 
 const MARK = '@@RESULT@@';
-const MAX_OUT = 512 * 1024;
+const MAX_OUT = 48 * 1024 * 1024;   // v2: tăng để script gửi được tệp (base64) về cho bot
 
 // ---------- Runner JavaScript (hàm này được chuyển thành chuỗi rồi chạy bằng `node -e`) ----------
 function jsRunner() {
@@ -134,12 +134,12 @@ function runScript(lang, code, input, timeoutMs = 5000) {
     if (!rt || !rt.ok) return resolve({ ok: false, error: `Máy chưa có môi trường chạy "${lang}"`, ms: 0 });
     const t0 = Date.now();
     let stdout = '', stderr = '', size = 0, killed = false, done = false;
-    const finish = r => { if (done) return; done = true; clearTimeout(timer); resolve({ ms: Date.now() - t0, stdout, stderr, ...r }); };
+    const finish = r => { if (done) return; done = true; if (timer) clearTimeout(timer); resolve({ ms: Date.now() - t0, stdout, stderr, ...r }); };
     let child;
     try {
       child = spawn(rt.cmd, rt.args, { env: safeEnv(), cwd: os.tmpdir(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (e) { return resolve({ ok: false, error: 'Không chạy được: ' + e.message, ms: 0 }); }
-    const timer = setTimeout(() => { killed = 'time'; child.kill('SIGKILL'); }, timeoutMs);
+    const timer = timeoutMs > 0 ? setTimeout(() => { killed = 'time'; child.kill('SIGKILL'); }, timeoutMs) : null;   // v2: timeoutMs = 0 -> KHÔNG giới hạn thời gian
 
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
     child.stdout.on('data', d => { size += d.length; if (size > MAX_OUT) { killed = 'size'; child.kill('SIGKILL'); } else stdout += d; });

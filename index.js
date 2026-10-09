@@ -1,6 +1,7 @@
 require('dotenv').config();
 const fs = require('fs'), path = require('path'), express = require('express');
-const { Client, GatewayIntentBits, Events, ButtonBuilder, ButtonStyle, ActionRowBuilder, MessageFlags } = require('discord.js');
+const { Client, GatewayIntentBits, Events, ButtonBuilder, ButtonStyle, ActionRowBuilder, MessageFlags, AttachmentBuilder } = require('discord.js');
+const dnsP = require('dns').promises, netM = require('net');
 const { runScript, detectRuntimes, runtimeInfo, RUNTIMES } = require('./scriptRunner');
 const tutien = require('./tutien');   // hệ thống Tu Tiên (trang cấu hình ở cổng TUTIEN_PORT)
 
@@ -263,7 +264,7 @@ function cleanScript(s = {}) {
     deleteAfter: clampNum(s.deleteAfter, 0, 86400),
     channels: String(s.channels || ''),
     fromIds: String(s.fromIds || ''),
-    timeoutMs: clampNum(s.timeoutMs || 5000, 500, 15000),
+    timeoutMs: Number(s.timeoutMs) === 0 ? 0 : clampNum(s.timeoutMs || 5000, 500, 86400000),   // v2: 0 = KHÔNG giới hạn
     code: String(s.code || '').slice(0, 100000)
   };
 }
@@ -589,7 +590,8 @@ function rememberChat(msg) {
     if (msg.attachments?.size) t += ` [+${msg.attachments.size} tệp]`;
     if (!t.trim()) { if (!msg.embeds?.length) return; t = '[embed]'; }
     const arr = CHAT_BUF.get(msg.channelId) || [];
-    arr.push({ id: msg.id, userId: msg.author.id, user: msg.member?.displayName || msg.author.username, bot: !!msg.author.bot, self: msg.author.id === client.user?.id, text: t.slice(0, 500), t: msg.createdTimestamp || Date.now() });
+    const files = msg.attachments?.size ? [...msg.attachments.values()].slice(0, 5).map(a => ({ name: a.name, url: a.url, contentType: a.contentType || '', size: a.size || 0 })) : [];
+    arr.push({ id: msg.id, files, userId: msg.author.id, user: msg.member?.displayName || msg.author.username, bot: !!msg.author.bot, self: msg.author.id === client.user?.id, text: t.slice(0, 500), t: msg.createdTimestamp || Date.now() });
     while (arr.length > CHAT_BUF_MAX) arr.shift();
     CHAT_BUF.set(msg.channelId, arr);
   } catch { /* bỏ qua */ }
@@ -609,7 +611,8 @@ function buildCtx(msg, pa, text = msg.content) {
     mentions: [...msg.mentions.users.values()].map(u => ({ id: u.id, username: u.username, mention: `<@${u.id}>`, bot: !!u.bot })),
     tutien: tutien.brief(msg.author.id),     // dữ liệu Tu Tiên của người gõ (null nếu chưa chơi)
     channelId: msg.channel.id, guildId: msg.guild?.id || '', guildName: msg.guild?.name || '', messageId: msg.id, now: Date.now(),
-    recent: recentOf(msg.channel.id, msg.id)   // các tin gần đây trong kênh (cũ -> mới), không gồm tin đang xử lý
+    recent: recentOf(msg.channel.id, msg.id),   // các tin gần đây trong kênh (cũ -> mới), không gồm tin đang xử lý
+    attachments: [...(msg.attachments?.values?.() || [])].slice(0, 10).map(a => ({ id: a.id, name: a.name, url: a.url, contentType: a.contentType || '', size: a.size || 0, width: a.width || 0, height: a.height || 0 }))   // v2: tệp đính kèm của tin
   };
 }
 
@@ -687,6 +690,76 @@ function uiPayload(s, p) {
   return o;
 }
 
+// ====== v2: GỬI TỆP (ảnh / video / file) + ĐỒNG HỒ ĐẾM CHO ui.send ======
+const UPLOAD_MAX = Number(process.env.UPLOAD_MAX_MB || 10) * 1024 * 1024;   // giới hạn upload mặc định của Discord (server boost cao hơn thì đặt UPLOAD_MAX_MB trong .env)
+const privIp = ip => {
+  if (netM.isIPv4(ip)) { const [a, b] = ip.split('.').map(Number); return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127); }
+  const x = String(ip).toLowerCase(); return x === '::1' || x === '::' || x.startsWith('fc') || x.startsWith('fd') || x.startsWith('fe80') || x.startsWith('::ffff:');
+};
+// Tải tệp từ link https công khai (chặn địa chỉ nội bộ / localhost, tối đa 3 lần chuyển hướng, giới hạn dung lượng)
+async function safeDownload(url, maxBytes, hops = 0) {
+  const u = new URL(url);
+  if (u.protocol !== 'https:') throw new Error('chỉ cho phép https');
+  const addrs = await dnsP.lookup(u.hostname, { all: true });
+  if (!addrs.length || addrs.some(a => privIp(a.address))) throw new Error('địa chỉ nội bộ bị chặn');
+  const r = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(90000) });
+  if ([301, 302, 303, 307, 308].includes(r.status)) {
+    const loc = r.headers.get('location');
+    if (!loc || hops >= 3) throw new Error('chuyển hướng không hợp lệ');
+    return safeDownload(new URL(loc, url).href, maxBytes, hops + 1);
+  }
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  if ((Number(r.headers.get('content-length')) || 0) > maxBytes) throw new Error('tệp quá lớn');
+  const parts = []; let n = 0;
+  for await (const c of r.body) { n += c.length; if (n > maxBytes) throw new Error('tệp quá lớn'); parts.push(c); }
+  return Buffer.concat(parts);
+}
+// payload.files = [{ name, url | base64 | text }]  ->  o.files (AttachmentBuilder). Lỗi / quá lớn thì gửi link thay thế.
+async function attachFiles(o, p, channel) {
+  if (!isObj(p) || !Array.isArray(p.files) || !p.files.length) return o;
+  const limit = Number(channel?.guild?.maximumUploadLimit) || UPLOAD_MAX;
+  const out = [], notes = [];
+  for (const f of p.files.slice(0, 10)) {
+    if (!isObj(f)) continue;
+    const name = String(f.name || 'file').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(-80) || 'file';
+    try {
+      let buf;
+      if (f.base64) buf = Buffer.from(String(f.base64), 'base64');
+      else if (f.text != null) buf = Buffer.from(String(f.text), 'utf8');
+      else if (f.url) buf = await safeDownload(String(f.url), limit);
+      if (!buf || !buf.length) throw new Error('tệp rỗng');
+      if (buf.length > limit) throw new Error('lớn hơn giới hạn upload ' + Math.round(limit / 1048576) + 'MB');
+      out.push(new AttachmentBuilder(buf, { name }));
+    } catch (e) {
+      log('error', `Không đính kèm được "${name}": ${e.message}`);
+      notes.push(f.url ? `📎 ${name}: ${f.url}` : `⚠️ Không gửi được tệp ${name} (${e.message})`);
+    }
+  }
+  if (out.length) o.files = out;
+  if (notes.length) o.content = ((o.content || '') + '\n' + notes.join('\n')).slice(0, 2000);
+  if (!out.length && !String(o.content || '').trim()) o.content = '⚠️ Không gửi được tệp.';
+  return o;
+}
+// payload.counter = 'văn bản có {s}' : bot tự sửa tin mỗi 3 giây, {s} = số giây đã chờ, tới khi script ui.edit tin đó
+const liveCounters = new Map();
+const fmtSecs = n => n < 60 ? n + 's' : Math.floor(n / 60) + 'p' + String(n % 60).padStart(2, '0') + 's';
+function startCounter(tag, m, tpl, every = 3000) {
+  stopCounter(tag);
+  const t0 = Date.now(), c = { pending: null, iv: null };
+  c.iv = setInterval(() => {
+    const sec = Math.floor((Date.now() - t0) / 1000);
+    if (sec > 6 * 3600) return void stopCounter(tag);          // an toàn: tự dừng sau 6 giờ nếu script không bao giờ sửa tin
+    if (c.pending) return;                                      // lần sửa trước chưa xong -> bỏ qua nhịp này
+    c.pending = m.edit({ content: tpl.replace(/\{s\}/g, fmtSecs(sec)).slice(0, 2000), allowedMentions: { parse: [] } }).catch(() => {}).finally(() => { c.pending = null; });
+  }, every);
+  liveCounters.set(tag, c);
+}
+async function stopCounter(tag) {
+  const c = liveCounters.get(tag); if (!c) return;
+  clearInterval(c.iv); liveCounters.delete(tag);
+  if (c.pending) await c.pending;                               // đợi lần sửa đồng hồ đang dở xong để không đè lên câu trả lời
+}
+
 async function applyUi(s, ops, t) {
   let used = false;   // đã dùng lượt phản hồi đầu của interaction chưa
   for (const op of (ops || []).slice(0, 20)) {
@@ -694,8 +767,10 @@ async function applyUi(s, ops, t) {
       const p = op.payload;
       if (op.type === 'send') {
         if (!t.channel) continue;
-        const m = await t.channel.send(uiPayload(s, p));
+        const o = await attachFiles(uiPayload(s, p), p, t.channel);
+        const m = await t.channel.send(o);
         if (op.tag) remember(uiMsgs, String(op.tag), { channelId: t.channel.id, id: m.id });
+        if (op.tag && isObj(p) && typeof p.counter === 'string') startCounter(String(op.tag), m, p.counter);   // v2: đồng hồ đếm giây
       } else if ((op.type === 'update' || op.type === 'reply') && t.inter) {
         if (!used && (op.type === 'update' || t.kind === 'e')) {
           await t.inter.editReply(uiPayload(s, p)); used = true;
@@ -707,16 +782,17 @@ async function applyUi(s, ops, t) {
           if (op.tag) remember(uiEphem, String(op.tag), { inter: t.inter, id: m.id });
         }
       } else if (op.type === 'edit') {
+        await stopCounter(String(op.tag));   // v2: dừng đồng hồ trước khi sửa thành câu trả lời
         const e = uiEphem.get(String(op.tag));
         if (e) await e.inter.webhook.editMessage(e.id, uiPayload(s, p));
         else {
           const r = uiMsgs.get(String(op.tag));
-          if (r) { const ch = await client.channels.fetch(r.channelId); const m = await ch.messages.fetch(r.id); await m.edit(uiPayload(s, p)); }
+          if (r) { const ch = await client.channels.fetch(r.channelId); const m = await ch.messages.fetch(r.id); await m.edit(await attachFiles(uiPayload(s, p), p, ch)); }
         }
       } else if (op.type === 'after') {
         if (pendingTimers >= 300) continue;
         pendingTimers++;
-        const sec = clampNum(op.seconds, 1, 600), data = String(op.data ?? ''), channelId = t.channelId, guildId = t.guildId, msgId = t.msgId;
+        const sec = clampNum(op.seconds, 1, 86400), data = String(op.data ?? ''), channelId = t.channelId, guildId = t.guildId, msgId = t.msgId;
         setTimeout(() => {
           pendingTimers--;
           enqueue(() => runUi(s.id, { event: 'timer', data, channelId, guildId, msgId })).catch(e => log('error', `Hẹn giờ script "${s.name}": ${e.message}`));
@@ -737,7 +813,7 @@ function uiCtx(ev) {
       roles: roles.map(r => r.name), roleIds: roles.map(r => r.id),
       isAdmin: !!m?.permissions?.has?.('Administrator'), isOwner: !!u && i?.guild?.ownerId === u.id
     },
-    mentions: [], tutien: u ? tutien.brief(u.id) : null, channelId: ev.channelId || '', guildId: ev.guildId || '', guildName: i?.guild?.name || '', messageId: i?.message?.id || '', now: Date.now(), recent: recentOf(ev.channelId || ''),
+    mentions: [], tutien: u ? tutien.brief(u.id) : null, channelId: ev.channelId || '', guildId: ev.guildId || '', guildName: i?.guild?.name || '', messageId: i?.message?.id || '', now: Date.now(), recent: recentOf(ev.channelId || ''), attachments: [],
     interaction: i ? { customId: ev.data, kind: ev.kind, messageId: i.message?.id || '', userId: u.id } : null,
     timer: ev.event === 'timer' ? { data: ev.data } : null
   };

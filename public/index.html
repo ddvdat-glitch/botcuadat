@@ -139,7 +139,7 @@ function drawScript(){
    ${SEL(P+'.replyMode',s.replyMode,[['reply','Reply tin nhắn'],['send','Gửi vào kênh']])}
    <span class="mu">Chờ giữa 2 lần/người (giây):</span>${N(P+'.cooldown',s.cooldown)}
    <span class="mu">Tự xóa trả lời sau (giây):</span>${N(P+'.deleteAfter',s.deleteAfter)}
-   <span class="mu">Giới hạn chạy (ms):</span><input type=number style="width:80px" min=500 max=15000 value="${+s.timeoutMs||5000}" oninput="S('${P}.timeoutMs',+this.value)"></div>
+   <span class="mu">Giới hạn chạy (ms, 0 = vô hạn):</span><input type=number style="width:110px" min=0 max=86400000 value="${+s.timeoutMs===0?0:(+s.timeoutMs||5000)}" oninput="S('${P}.timeoutMs',+this.value)"></div>
    <div class="r"><span class="mu">Chỉ chạy ở kênh (ID, cách nhau dấu phẩy, trống = mọi kênh):</span>${PH(I(P+'.channels',s.channels,'f'),'ID kênh')}${PK('channel',P+'.channels','append')}</div>
    <div class="r"><span class="mu">Chỉ nhận tin từ ID (người hoặc bot, cách nhau dấu phẩy; trống = mọi người trừ bot):</span>${PH(I(P+'.fromIds',s.fromIds,'f'),'ID người / bot')}</div>
    <textarea class="code" spellcheck="false" oninput="S('${P}.code',this.value)" onkeydown="if(event.key=='Tab'){event.preventDefault();this.setRangeText('    ',this.selectionStart,this.selectionEnd,'end');S('${P}.code',this.value)}">${esc(s.code)}</textarea>
