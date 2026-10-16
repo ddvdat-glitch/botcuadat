@@ -62,3 +62,20 @@ Trang cấu hình mở ở **http://localhost:3001** (đổi bằng `TUTIEN_PORT
 ## ⚔️ PvP: uy áp + AI kể trận
 - Hai người PvP chênh **≥ 1 cảnh giới** (đổi ở Cài đặt): bên cao chỉ cần trừng mắt, bên thấp **chết chắc** (mất % tu vi), không giao chiến. Cùng cảnh giới hoặc đánh tâm ma vẫn mô phỏng trận.
 - Bot tự **tính kết quả** (số siêu lớn mô hình ngôn ngữ không tính được), rồi **gửi dữ liệu trận cho AI Ollama sẵn có** (lấy URL/model từ script AI, đổi bằng `!ai model …` là áp dụng) để viết lời kể và hiển thị. AI lỗi/chậm thì dùng nhật ký thường. Tab Cài đặt có nút thử AI.
+
+## 🖥️ Quản lý máy RDP bằng GitHub Actions (script `may_rdp`, lệnh `!may`)
+Script nằm trong `data.json › scripts` (id `may_rdp`), dữ liệu máy lưu ở `scriptData.shared.rdp` (tên máy, **ID + tên người tạo trên Discord**, giờ chạy, thông tin đăng nhập, Token Tailscale).
+
+| Lệnh | Việc làm |
+|---|---|
+| `!may tao <tên> [1h\|3h\|5h]` | Đọc file mẫu `may3.yml/.yaml` cùng thư mục với `bot.yml`, đổi `may-phu-2` → `<tên>` (và dòng `name:`), tạo `<tên>.yml`, rồi chạy action. Tự dò log, khi có khối "THÔNG TIN KẾT NỐI" thì cập nhật tin + ping chủ máy |
+| `!may chay <tên>` | Chạy lại máy đã có file |
+| `!may ds` | Danh sách action đang chạy (tên máy, run, chủ, giờ bắt đầu → kết thúc, còn bao lâu). Nút **🔐 Bảng đăng nhập (ẩn)** chỉ người bấm thấy |
+| `!may log <tên\|runId>` | Danh sách bước dạng `0s` / `Run $tz = …`; `!may log <tên> <số>` đọc 1 bước, `cuoi` bước mới nhất, `all` gửi file đầy đủ |
+| `!may dung <tên>` | Hủy run (hủy thì không tự chạy phiên mới) |
+| `!may ts <authkey>` | (Admin) lưu Tailscale auth key cố định vào data.json, tin chứa key bị xóa. Key hiện cùng thông tin đăng nhập, ghi là *Token Tailscale* |
+| `!may xem owner\|all` | (Admin) bảng đăng nhập ẩn: chỉ chủ máy + Admin (mặc định) hoặc mọi người |
+| `!may cfg` | (Admin) xem cấu hình |
+
+**Cần:** secret `PAT_TOKEN` (PAT có quyền `repo` + `workflow`) — `bot.yml` chuyển nó vào biến `RDP_GH_TOKEN`. Không có PAT thì chỉ liệt kê / chạy / đọc log / hủy được (GITHUB_TOKEN không được tạo file workflow). `scriptRunner.js` chỉ chuyển đúng các biến GitHub cần thiết cho script, **không** chuyển `DISCORD_TOKEN` / `ADMIN_PASSWORD`.
+⚠️ `data.json` được đẩy lên nhánh `bot-data`: nếu repo **công khai**, Token Tailscale và thông tin đăng nhập sẽ lộ — hãy để repo **private**.

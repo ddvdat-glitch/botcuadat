@@ -121,7 +121,9 @@ function detectRuntimes() {
 const runtimeInfo = () => Object.fromEntries(Object.entries(RUNTIMES).map(([k, v]) => [k, { label: v.label, ok: v.ok, version: v.version }]));
 
 function safeEnv() {
-  const keep = new Set(['PATH', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'HOME', 'USERPROFILE', 'LANG', 'COMSPEC', 'PATHEXT']);
+  const keep = new Set(['PATH', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'HOME', 'USERPROFILE', 'LANG', 'COMSPEC', 'PATHEXT',
+    // v3: script quản lý máy RDP (!may) cần gọi GitHub API -> chỉ chuyển đúng các biến này, KHÔNG chuyển DISCORD_TOKEN / ADMIN_PASSWORD
+    'GITHUB_REPOSITORY', 'GITHUB_REF_NAME', 'GITHUB_RUN_ID', 'GITHUB_WORKFLOW_REF', 'RDP_GH_TOKEN', 'GH_TOKEN']);
   const e = {};
   for (const k of Object.keys(process.env)) if (keep.has(k.toUpperCase())) e[k] = process.env[k];
   e.PYTHONIOENCODING = 'utf-8'; e.PYTHONUTF8 = '1';
