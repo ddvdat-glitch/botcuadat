@@ -142,56 +142,126 @@
                     const sid = String(body.sessionId || fData.sessionId || (id + '-' + (cur.runId || Date.now()))).trim();
                     const fName = body.fileName || uploadedFileName || `machine-info-${id}.json`;
 
-                    // Lưu file vào đĩa: rdp-sessions/<id>/ và received-files/
-                    let fileBufferToSave = null;
+                    const tailIp = fData.tailscaleIp || body.tailscaleIp || fData.ip || body.ip || (cur.info && cur.info.ip) || '';
+                    const rdpUser = fData.user || body.user || (cur.info && cur.info.user) || 'runneradmin';
+                    const rdpPass = fData.password || body.password || (cur.info && (cur.info.password || cur.info.pass)) || '';
+                    const wPort = String(fData.webPort || body.webPort || (cur.info && cur.info.webPort) || '8080');
+                    const sPort = String(fData.sunshinePort || body.sunshinePort || (cur.info && cur.info.sunshinePort) || '47990');
+                    const sUrl = fData.sunshineUrl || body.sunshineUrl || (cur.info && cur.info.sunshine) || (tailIp ? `https://${tailIp}:${sPort}/` : '');
+                    const pUrl = fData.panelUrl || body.panelUrl || (cur.info && cur.info.panel) || (tailIp ? `http://${tailIp}:${wPort}/` : '');
+                    const dLetter = String(fData.driveLetter || body.driveLetter || (cur.info && cur.info.driveLetter) || 'X');
+                    const sRoot = String(fData.sharedRoot || body.sharedRoot || (cur.info && cur.info.sharedRoot) || 'X:\\AISTV-SYSTEM');
+                    const pPath = String(fData.profilePath || body.profilePath || (cur.info && cur.info.profilePath) || ('C:\\Users\\' + rdpUser));
+                    const aDev = String(fData.audioDevice || body.audioDevice || fData.audio || body.audio || (cur.info && cur.info.audio) || 'Speakers (VB-Audio Virtual Cable), CABLE Output (VB-Audio Virtual Cable), VB-Audio Virtual Cable');
+                    const resScreen = String(fData.resolution || body.resolution || (cur.info && cur.info.screen) || '1920x1080@60');
+                    const sEpoch = Number(fData.startEpoch || body.startEpoch || (cur.startMs ? Math.floor(cur.startMs / 1000) : Math.floor(Date.now() / 1000)));
+                    const durM = Number(fData.durationMinutes || body.durationMinutes || cur.minutes || 300);
+                    const remSec = Number(fData.remainSeconds != null ? fData.remainSeconds : (body.remainSeconds != null ? body.remainSeconds : Math.max(0, (sEpoch + durM * 60) - Math.floor(Date.now() / 1000))));
+                    const ghRepo = String(fData.repo || body.repo || cur.repo || '');
+                    const relTag = String(fData.releaseTag || body.releaseTag || ('aistv-storage-' + id));
+                    const stBranch = String(fData.stateBranch || body.stateBranch || ('aistv-state-' + id));
+                    const rId = String(fData.runId || body.runId || cur.runId || '');
+                    const sdStat = String(fData.stardeskStatus || body.stardeskStatus || fData.stardesk || body.stardesk || 'Chờ khởi tạo');
+                    const dUsed = Number(fData.diskUsedGb != null ? fData.diskUsedGb : (body.diskUsedGb != null ? body.diskUsedGb : 0));
+                    const dFree = Number(fData.diskFreeGb != null ? fData.diskFreeGb : (body.diskFreeGb != null ? body.diskFreeGb : 0));
+                    const stat = String(fData.status || body.status || cur.status || 'ready');
+                    const reason = String(fData.reason || body.reason || 'heartbeat');
+                    const tUtc = String(fData.timestampUtc || body.timestampUtc || new Date().toISOString());
+
+                    const fullInfoObj = {
+                      sessionId: sid,
+                      machineId: id,
+                      tailscaleIp: tailIp,
+                      ip: tailIp,
+                      user: rdpUser,
+                      password: rdpPass,
+                      sunshineUrl: sUrl,
+                      panelUrl: pUrl,
+                      webPort: wPort,
+                      sunshinePort: sPort,
+                      osBuild: String(fData.osBuild || body.osBuild || (cur.info && cur.info.osBuild) || '20348'),
+                      windowsImage: String(fData.windowsImage || body.windowsImage || (cur.info && cur.info.windowsImage) || 'windows-2022'),
+                      driveLetter: dLetter,
+                      sharedRoot: sRoot,
+                      profilePath: pPath,
+                      audioDevice: aDev,
+                      resolution: resScreen,
+                      startEpoch: sEpoch,
+                      durationMinutes: durM,
+                      remainSeconds: remSec,
+                      repo: ghRepo,
+                      releaseTag: relTag,
+                      stateBranch: stBranch,
+                      runId: rId,
+                      stardeskStatus: sdStat,
+                      diskUsedGb: dUsed,
+                      diskFreeGb: dFree,
+                      status: stat,
+                      reason: reason,
+                      timestampUtc: tUtc
+                    };
+
+                    cur.fileData = fullInfoObj;
+
+                    // Lưu file vào đĩa: rdp-sessions/<id>/ và received-files/ ở cả process.cwd() & os.tmpdir()
+                    let fileBufferToSave = Buffer.from(JSON.stringify(fullInfoObj, null, 2), 'utf8');
                     if (uploadedFileContent) {
                       fileBufferToSave = uploadedFileContent;
                     } else if (body.fileContentB64) {
                       try { fileBufferToSave = Buffer.from(body.fileContentB64, 'base64'); } catch {}
-                    } else if (body.fileData) {
-                      fileBufferToSave = Buffer.from(JSON.stringify(body.fileData, null, 2), 'utf8');
-                    } else {
-                      fileBufferToSave = Buffer.from(JSON.stringify(Object.assign({ sessionId: sid, machineId: id, timestampUtc: new Date().toISOString() }, body), null, 2), 'utf8');
                     }
 
-                    if (fileBufferToSave) {
+                    const targetDirs = [process.cwd()];
+                    try {
+                      const tDir = require('os').tmpdir();
+                      if (tDir && !targetDirs.includes(tDir)) targetDirs.push(tDir);
+                    } catch {}
+
+                    for (const baseDir of targetDirs) {
                       try {
-                        const mDir = path.join(process.cwd(), 'rdp-sessions', id);
+                        const mDir = path.join(baseDir, 'rdp-sessions', id);
                         if (!fs.existsSync(mDir)) fs.mkdirSync(mDir, { recursive: true });
                         fs.writeFileSync(path.join(mDir, fName), fileBufferToSave);
-                        const rDir = path.join(process.cwd(), 'received-files');
+                        fs.writeFileSync(path.join(mDir, `machine-info-${id}.json`), fileBufferToSave);
+                        const rDir = path.join(baseDir, 'received-files');
                         if (!fs.existsSync(rDir)) fs.mkdirSync(rDir, { recursive: true });
                         fs.writeFileSync(path.join(rDir, fName), fileBufferToSave);
+                        fs.writeFileSync(path.join(rDir, `machine-info-${id}.json`), fileBufferToSave);
                         fs.writeFileSync(path.join(rDir, `${id}-${sid}.json`), fileBufferToSave);
-                        cur.lastFileReceived = fName;
-                        cur.lastFileAt = Date.now();
+                        fs.writeFileSync(path.join(baseDir, `machine-info-${id}.json`), fileBufferToSave);
                       } catch {}
                     }
+                    cur.lastFileReceived = fName;
+                    cur.lastFileAt = Date.now();
 
                     cur.info = Object.assign(cur.info || {}, {
                       machineId: id,
-                      repoTag: body.releaseTag || fData.releaseTag || ('aistv-storage-' + id),
-                      stateBranch: body.stateBranch || fData.stateBranch || ('aistv-state-' + id),
-                      ip: body.tailscaleIp || body.ip || fData.tailscaleIp || fData.ip || (cur.info && cur.info.ip) || '',
-                      webPort: body.webPort || fData.webPort || '8080',
-                      sunshinePort: body.sunshinePort || fData.sunshinePort || '47990',
-                      sunshine: body.sunshineUrl || fData.sunshineUrl || (body.tailscaleIp ? `https://${body.tailscaleIp}:${body.sunshinePort || 47990}/` : ''),
-                      panel: body.panelUrl || fData.panelUrl || (body.tailscaleIp ? `http://${body.tailscaleIp}:${body.webPort || 8080}/` : ''),
-                      stardesk: body.stardesk || fData.stardeskStatus || 'Đang chạy',
+                      repoTag: relTag,
+                      stateBranch: stBranch,
+                      ip: tailIp,
+                      webPort: wPort,
+                      sunshinePort: sPort,
+                      sunshine: sUrl,
+                      panel: pUrl,
+                      stardesk: sdStat,
                       stardeskId: body.stardeskId || '',
-                      user: body.user || fData.user || (cur.info && cur.info.user) || 'runneradmin',
-                      pass: body.password || fData.password || (cur.info && cur.info.pass) || '',
-                      screen: body.resolution || fData.resolution || '1920x1080@60',
-                      audio: body.audio || fData.audioDevice || 'VB-Audio Virtual Cable',
-                      disk: body.driveLetter ? `${body.driveLetter}:\\ (${body.sharedRoot || ''})` : ((fData.driveLetter ? `${fData.driveLetter}:\\ (${fData.sharedRoot || ''})` : (cur.info && cur.info.disk)) || 'D:\\'),
-                      profile: body.profilePath || fData.profilePath || 'C:\\Users\\runneradmin',
-                      osBuild: body.osBuild || fData.osBuild || '',
-                      windowsImage: body.windowsImage || fData.windowsImage || '',
-                      remainSeconds: body.remainSeconds != null ? Number(body.remainSeconds) : (fData.remainSeconds != null ? Number(fData.remainSeconds) : null),
-                      diskUsedGb: fData.diskUsedGb != null ? fData.diskUsedGb : null,
-                      diskFreeGb: fData.diskFreeGb != null ? fData.diskFreeGb : null,
-                      eventReason: body.reason || 'heartbeat',
-                      updatedUtc: new Date().toISOString()
+                      user: rdpUser,
+                      pass: rdpPass,
+                      password: rdpPass,
+                      screen: resScreen,
+                      audio: aDev,
+                      disk: `${dLetter}:\\ (${sRoot})`,
+                      driveLetter: dLetter,
+                      sharedRoot: sRoot,
+                      profile: pPath,
+                      profilePath: pPath,
+                      osBuild: fullInfoObj.osBuild,
+                      windowsImage: fullInfoObj.windowsImage,
+                      remainSeconds: remSec,
+                      diskUsedGb: dUsed,
+                      diskFreeGb: dFree,
+                      eventReason: reason,
+                      updatedUtc: tUtc
                     });
                     if (cur.info.ip && body.status !== 'stopped' && body.status !== 'done') {
                       cur.status = 'ready';
@@ -209,6 +279,8 @@
                         ip: cur.info.ip || '',
                         user: cur.info.user || 'runneradmin',
                         pass: cur.info.pass || '',
+                        password: cur.info.pass || '',
+                        fileData: fullInfoObj,
                         info: {}
                       };
                       st.sessions[id].push(curSession);
@@ -218,7 +290,11 @@
                     curSession.status = (body.status === 'stopped' || body.status === 'done') ? 'stopped' : 'active';
                     curSession.ip = cur.info.ip || curSession.ip;
                     curSession.user = cur.info.user || curSession.user;
-                    if (cur.info.pass) curSession.pass = cur.info.pass;
+                    if (cur.info.pass) {
+                      curSession.pass = cur.info.pass;
+                      curSession.password = cur.info.pass;
+                    }
+                    curSession.fileData = fullInfoObj;
                     curSession.info = Object.assign(curSession.info || {}, cur.info);
                     cur.currentSessionId = sid;
                     cur.latestSession = curSession;
