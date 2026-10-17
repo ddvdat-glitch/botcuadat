@@ -1,3 +1,4 @@
+require('./rdp-bridge.js');
 require('dotenv').config();
 const fs = require('fs'), path = require('path'), express = require('express');
 const { Client, GatewayIntentBits, Events, ButtonBuilder, ButtonStyle, ActionRowBuilder, MessageFlags, AttachmentBuilder } = require('discord.js');
