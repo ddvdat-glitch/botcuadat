@@ -122,8 +122,9 @@ const runtimeInfo = () => Object.fromEntries(Object.entries(RUNTIMES).map(([k, v
 
 function safeEnv() {
   const keep = new Set(['PATH', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'HOME', 'USERPROFILE', 'LANG', 'COMSPEC', 'PATHEXT',
-    // v3: script quản lý máy RDP (!may) cần gọi GitHub API -> chỉ chuyển đúng các biến này, KHÔNG chuyển DISCORD_TOKEN / ADMIN_PASSWORD
-    'GITHUB_REPOSITORY', 'GITHUB_REF_NAME', 'GITHUB_RUN_ID', 'GITHUB_WORKFLOW_REF', 'RDP_GH_TOKEN', 'GH_TOKEN']);
+    // script quản lý máy RDP (!may) cần gọi GitHub API -> chuyển các biến cấu hình repo & token
+    'GITHUB_REPOSITORY', 'GITHUB_REF_NAME', 'GITHUB_RUN_ID', 'GITHUB_WORKFLOW_REF', 'RDP_GH_TOKEN', 'GH_TOKEN',
+    'PAT_TOKEN', 'STORAGE_REPO', 'RUNNER_REPO', 'STORAGE_GH_TOKEN']);
   const e = {};
   for (const k of Object.keys(process.env)) if (keep.has(k.toUpperCase())) e[k] = process.env[k];
   e.PYTHONIOENCODING = 'utf-8'; e.PYTHONUTF8 = '1';
