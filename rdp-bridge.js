@@ -143,6 +143,10 @@
                     const fName = body.fileName || uploadedFileName || `machine-info-${id}.json`;
 
                     const tailIp = fData.tailscaleIp || body.tailscaleIp || fData.ip || body.ip || (cur.info && cur.info.ip) || '';
+                    const stardeskId = String(fData.stardeskId || body.stardeskId || (cur.info && cur.info.stardeskId) || '').trim();
+                    const storageRepo = String(fData.storageRepo || body.storageRepo || (cur.info && cur.info.storageRepo) || 'ddvdat-glitch/rdp').trim();
+                    const runnerRepo = String(fData.runnerRepo || body.runnerRepo || fData.repo || body.repo || cur.repo || '').trim();
+                    const displayName = String(fData.displayName || body.displayName || (cur.info && cur.info.displayName) || id).trim();
                     const rdpUser = fData.user || body.user || (cur.info && cur.info.user) || 'runneradmin';
                     const rdpPass = fData.password || body.password || (cur.info && (cur.info.password || cur.info.pass)) || '';
                     const wPort = String(fData.webPort || body.webPort || (cur.info && cur.info.webPort) || '8080');
@@ -171,6 +175,10 @@
                     const fullInfoObj = {
                       sessionId: sid,
                       machineId: id,
+                      displayName: displayName,
+                      stardeskId: stardeskId,
+                      storageRepo: storageRepo,
+                      runnerRepo: runnerRepo,
                       tailscaleIp: tailIp,
                       ip: tailIp,
                       user: rdpUser,
@@ -236,6 +244,10 @@
 
                     cur.info = Object.assign(cur.info || {}, {
                       machineId: id,
+                      displayName: displayName,
+                      stardeskId: stardeskId,
+                      storageRepo: storageRepo,
+                      runnerRepo: runnerRepo,
                       repoTag: relTag,
                       stateBranch: stBranch,
                       ip: tailIp,
@@ -244,7 +256,6 @@
                       sunshine: sUrl,
                       panel: pUrl,
                       stardesk: sdStat,
-                      stardeskId: body.stardeskId || '',
                       user: rdpUser,
                       pass: rdpPass,
                       password: rdpPass,
@@ -309,15 +320,17 @@
                     const promptLines = [
                       `[THÔNG TIN MÁY RDP: ${id.toUpperCase()}]`,
                       `- Trạng thái: ${isOnline ? '🟢 ĐANG HOẠT ĐỘNG (Online)' : '🔴 KHÔNG HOẠT ĐỘNG (Offline)'}`,
-                      `- IP Tailscale: ${cur.info.ip || 'Chưa có'} (RDP: ${cur.info.ip ? cur.info.ip + ':3389' : 'N/A'})`,
+                      `- StarDesk ID: ${cur.info.stardeskId || 'Chưa có'} (${cur.info.stardeskStatus || 'Đang chạy'})`,
                       `- Tài khoản RDP: ${cur.info.user || 'runneradmin'}`,
                       `- Mật khẩu: ${cur.info.pass || 'Chưa có'}`,
+                      `- Kho lưu trữ (Repo Gốc): ${cur.info.storageRepo || 'ddvdat-glitch/rdp'} (${cur.info.repoTag || ('aistv-storage-' + id)})`,
+                      `- Runner: ${cur.info.runnerRepo || cur.repo || 'ohohhoho82-alt/app'}`,
                       `- Mã phiên mới nhất: ${sid}`,
                       `- Thời gian còn lại: ${remText}`,
-                      `- Web Quản Lý: ${cur.info.panel || 'N/A'}`,
-                      `- Sunshine Web: ${cur.info.sunshine || 'N/A'}`,
+                      cur.info.ip ? `- IP mạng: ${cur.info.ip}` : null,
+                      cur.info.panel ? `- Web Quản Lý: ${cur.info.panel}` : null,
                       `- Cập nhật gần nhất: ${new Date().toISOString()}`
-                    ];
+                    ].filter(Boolean);
                     cur.autoPrompt = promptLines.join('\n');
 
                     // Ghi nhận vào danh sách file
@@ -329,6 +342,9 @@
                       size: fileBufferToSave ? fileBufferToSave.length : 0,
                       receivedAt: Date.now(),
                       updatedUtc: new Date().toISOString(),
+                      stardeskId: cur.info.stardeskId || '',
+                      storageRepo: cur.info.storageRepo || 'ddvdat-glitch/rdp',
+                      runnerRepo: cur.info.runnerRepo || cur.repo || '',
                       ip: cur.info.ip,
                       user: cur.info.user,
                       pass: cur.info.pass,
@@ -352,6 +368,9 @@
                       const m = machines[f.machineId];
                       const isOnline = m && (m.status !== 'stopped' && m.status !== 'done' && (now - (m.lastReportAt || 0) < 600000));
                       return Object.assign({}, f, {
+                        stardeskId: (m && m.info && m.info.stardeskId) || f.stardeskId || '',
+                        storageRepo: (m && m.info && m.info.storageRepo) || f.storageRepo || 'ddvdat-glitch/rdp',
+                        runnerRepo: (m && m.info && m.info.runnerRepo) || f.runnerRepo || (m && m.repo) || '',
                         isOnline: !!isOnline,
                         lastHeartbeat: m ? m.lastReportAt : f.receivedAt,
                         secondsSinceHeartbeat: m && m.lastReportAt ? Math.floor((now - m.lastReportAt) / 1000) : null,
@@ -607,7 +626,7 @@
                           <input id="acc_repo" placeholder="owner/repo (VD: user/rdp-repo)">
                           <input id="acc_token" type="password" placeholder="PAT Token (ghp_...)">
                           <input id="acc_branch" placeholder="Nhánh (main)" value="main" style="width:100px">
-                          <input id="acc_tpl" placeholder="File mẫu (may3.yml)" value="may3.yml" style="width:140px">
+                          <input id="acc_tpl" placeholder="File mẫu (taomay.yaml)" value="taomay.yaml" style="width:140px">
                           <button onclick="addAcc()">➕ Lưu Tài Khoản Git</button>
                         </div>
                         <table id="tbl_acc"><thead><tr><th>Alias</th><th>Repo</th><th>Nhánh</th><th>Mẫu</th><th>Mặc định</th><th>Thao tác</th></tr></thead><tbody></tbody></table>
@@ -627,7 +646,7 @@
                           <h2>3. Danh Sách Máy Ảo & Điều Khiển Trực Tiếp Qua IP</h2>
                           <a href="/rdp-files" style="color:#38bdf8;text-decoration:none;font-weight:600">📥 Xem Trang Nhận File Máy Ảo →</a>
                         </div>
-                        <table id="tbl_vm"><thead><tr><th>ID Máy</th><th>Repo / Acc</th><th>Chủ sở hữu</th><th>IP Tailscale</th><th>Tài khoản / MK</th><th>Trạng thái / Phiên</th><th>Gửi lệnh & Prompt</th></tr></thead><tbody></tbody></table>
+                        <table id="tbl_vm"><thead><tr><th>ID Máy</th><th>Runner / Kho Gốc</th><th>Chủ sở hữu</th><th>StarDesk ID</th><th>Tài khoản / MK</th><th>Trạng thái / Phiên</th><th>Gửi lệnh & Prompt</th></tr></thead><tbody></tbody></table>
                       </div>
                     </div>
                     <script>
@@ -772,7 +791,7 @@
                               <th>Tên File / Kích thước</th>
                               <th>Máy Ảo</th>
                               <th>Mã Phiên (Session ID)</th>
-                              <th>IP Tailscale & Web</th>
+                              <th>StarDesk ID / IP</th>
                               <th>User / Mật Khẩu</th>
                               <th>Trạng Thái (Heartbeat)</th>
                               <th>Thời Gian Nhận</th>
