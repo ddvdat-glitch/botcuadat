@@ -1,4 +1,4 @@
-require('./rdp-bridge.js');
+const rdp = require('./rdp-bridge.js');
 require('dotenv').config();
 const fs = require('fs'), path = require('path'), express = require('express');
 const { Client, GatewayIntentBits, Events, ButtonBuilder, ButtonStyle, ActionRowBuilder, MessageFlags, AttachmentBuilder } = require('discord.js');
@@ -854,6 +854,7 @@ async function runUi(sid, ev) {
 client.on(Events.InteractionCreate, async i => {
   try {
     if (i.isButton() && String(i.customId).startsWith('tt:')) return await tutien.onButton(i);   // nút của menu Tu Tiên
+    if (i.isButton() && String(i.customId).startsWith('rdp:')) return await rdp.onButton(i);     // nút của menu RDP
     if (!i.isButton() || !String(i.customId).startsWith('sx:')) return;
     const [, sid, kind, ...rest] = i.customId.split(':'), data = rest.join(':');
     const s = db.scripts.find(x => x.id === sid);
@@ -865,8 +866,9 @@ client.on(Events.InteractionCreate, async i => {
   } catch (e) { log('error', 'interaction: ' + (e.stack || e.message)); }
 });
 
-// ====================== TU TIÊN: nối vào bot ======================
+// ====================== TU TIÊN & RDP: nối vào bot ======================
 tutien.init({ db: () => db, saveSoon, saveNow, log, client, runScript, runtimeInfo, matchText, enqueue, scan: scanAll });
+rdp.init({ db: () => db, saveSoon, saveNow, log, client, runScript, runtimeInfo, matchText, enqueue, scan: scanAll });
 client.on('guildMemberUpdate', (o, n) => tutien.onMemberUpdate(n));   // role đổi -> cập nhật quyền/tự động treo của người chơi tu tiên
 
 // ====================== SỰ KIỆN ======================
@@ -904,6 +906,7 @@ client.on('messageCreate', async msg => {
     rememberMember(msg);
     if (msg.author.bot) { await handleScripts(msg); return; }
     if (await tutien.onMessage(msg)) return;      // lệnh Tu Tiên (lưu trong data.json > tutien.commands)
+    if (await rdp.onMessage(msg)) return;         // lệnh RDP (lưu trong data.json > rdp.commands)
     if (await handleScripts(msg)) return;
     await handleCommands(msg);
   } catch (e) { log('error', 'messageCreate: ' + (e.stack || e.message)); }

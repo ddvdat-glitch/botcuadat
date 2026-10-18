@@ -293,7 +293,7 @@
       "name": "Quản lý máy GameViewer & StarDesk (!may)",
       "enabled": true,
       "language": "javascript",
-      "trigger": "^!(may|thongtin|rdp)\\\\b",
+      "trigger": "^!(may|thongtin|rdp)\\b",
       "matchType": "regex",
       "replyMode": "send",
       "cooldown": 3,
@@ -1527,5 +1527,363 @@
       "prompt": "Bạn là thuyết thư nhân kể chuyện tiên hiệp. Nhận dữ liệu một trận luận bàn dạng JSON. KẾT QUẢ ĐÃ ĐƯỢC BOT CHỐT: tuyệt đối không đổi người thắng/thua, không bịa thêm kết quả hay con số. Viết 3-5 câu tiếng Việt, văn phong cổ trang tiên hiệp, giàu hình ảnh, nhắc tên các cảnh giới. Nếu kiểu=\"uy_ap\": kẻ cảnh giới cao KHÔNG ra tay, chỉ trừng mắt/uy áp là đối phương chết chắc — mô tả sự áp đảo tuyệt đối, không có giao chiến. Không dùng markdown, không liệt kê, chỉ in ra đoạn văn."
     },
     "roleLinks": []
+  },
+  "rdp": {
+    "commands": [
+      {
+        "id": "may_dashboard",
+        "name": "Bảng điều khiển máy ảo (!may)",
+        "trigger": "!may",
+        "matchType": "exact",
+        "type": "menu",
+        "menu": "main",
+        "cooldown": 3,
+        "enabled": true,
+        "replyMode": "reply",
+        "access": {
+          "mode": "all",
+          "roleIds": [],
+          "denyRoleIds": []
+        }
+      },
+      {
+        "id": "may_create",
+        "name": "Tạo máy ảo (!may tao)",
+        "trigger": "!may tao",
+        "matchType": "startsWith",
+        "type": "create",
+        "menu": "main",
+        "cooldown": 5,
+        "enabled": true,
+        "replyMode": "reply",
+        "access": {
+          "mode": "all",
+          "roleIds": [],
+          "denyRoleIds": []
+        }
+      },
+      {
+        "id": "may_restart",
+        "name": "Khởi động lại máy (!may reset)",
+        "trigger": "!may reset",
+        "matchType": "startsWith",
+        "type": "restart",
+        "menu": "main",
+        "cooldown": 10,
+        "enabled": true,
+        "replyMode": "reply",
+        "access": {
+          "mode": "all",
+          "roleIds": [],
+          "denyRoleIds": []
+        }
+      },
+      {
+        "id": "may_stop",
+        "name": "Tắt máy ảo (!may stop)",
+        "trigger": "!may stop",
+        "matchType": "startsWith",
+        "type": "stop",
+        "menu": "main",
+        "cooldown": 5,
+        "enabled": true,
+        "replyMode": "reply",
+        "access": {
+          "mode": "all",
+          "roleIds": [],
+          "denyRoleIds": []
+        }
+      },
+      {
+        "id": "may_scan",
+        "name": "Quét & Nâng cấp YML (!may scan)",
+        "trigger": "!may scan",
+        "matchType": "exact",
+        "type": "scan",
+        "menu": "main",
+        "cooldown": 10,
+        "enabled": true,
+        "replyMode": "reply",
+        "access": {
+          "mode": "staff",
+          "roleIds": [],
+          "denyRoleIds": []
+        }
+      }
+    ],
+    "menus": [
+      {
+        "id": "main",
+        "name": "Bảng điều khiển chính",
+        "ownerOnly": false,
+        "content": "",
+        "embed": {
+          "enabled": true,
+          "color": "#8b5cf6",
+          "title": "☯️ BẢNG ĐIỀU KHIỂN MÁY ẢO GAMEVIEWER & STARDESK",
+          "description": "📊 **Thống kê:** 🟢 Online: **{onlineCount}** │ 🔴 Offline: **{offlineCount}** │ 📦 Tổng: **{totalCount}** máy\n🏃 **Runner Repo:** `{runnerRepo}` │ 💽 **Kho Lưu Ổ:** `{storageRepo}`\n\n{machineList}",
+          "url": "",
+          "thumbnail": "",
+          "image": "",
+          "author": {
+            "name": "AISTV Cloud System",
+            "icon": ""
+          },
+          "footer": {
+            "text": "Hệ thống tự động đồng bộ • Bấm [⚙️ Quản Lý Ẩn] để thao tác riêng tư",
+            "icon": ""
+          },
+          "timestamp": true,
+          "fields": []
+        },
+        "rows": [
+          [
+            {
+              "label": "⚙️ Quản Lý Ẩn",
+              "emoji": "⚙️",
+              "style": "primary",
+              "action": {
+                "type": "panel",
+                "value": "mgr"
+              }
+            },
+            {
+              "label": "➕ Tạo Máy Mới",
+              "emoji": "➕",
+              "style": "success",
+              "action": {
+                "type": "panel",
+                "value": "create"
+              }
+            },
+            {
+              "label": "🔄 Quét & Nâng Cấp YML",
+              "emoji": "🔄",
+              "style": "secondary",
+              "action": {
+                "type": "cmd",
+                "value": "may_scan"
+              }
+            }
+          ],
+          [
+            {
+              "label": "🔄 Làm Mới",
+              "emoji": "🔄",
+              "style": "secondary",
+              "action": {
+                "type": "refresh",
+                "value": "refresh"
+              }
+            },
+            {
+              "label": "👁️ Hiện/Ẩn PIN",
+              "emoji": "👁️",
+              "style": "secondary",
+              "action": {
+                "type": "toggle_pin",
+                "value": "toggle"
+              }
+            },
+            {
+              "label": "🌐 Web Tu Tiên UI",
+              "emoji": "🌐",
+              "style": "link",
+              "action": {
+                "type": "link",
+                "value": "http://datdemo.duckdns.org:3000/rdp-manager"
+              }
+            }
+          ]
+        ]
+      },
+      {
+        "id": "manager",
+        "name": "Bảng Quản Lý Ẩn (Ephemeral)",
+        "ownerOnly": true,
+        "content": "",
+        "embed": {
+          "enabled": true,
+          "color": "#6366f1",
+          "title": "⚙️ BẢNG QUẢN LÝ MÁY ẢO LIÊN TỤC (BẢNG ẨN)",
+          "description": "🏷️ **Máy đang chọn:** **{curDisplayName}** (`{curMachineId}`)\n📊 **Trạng thái:** {curStatusBadge}\n🎮 **GameViewer ID:** `{curGvId}`\n🔑 **PIN Code:** `{curDisplayPin}`\n⭐ **StarDesk ID:** `{curStardeskId}`\n👤 **User / Pass:** `{curUser}` / `{curPass}`\n⏰ **Thời gian:** `{curRemain}`\n👑 **Chủ sở hữu:** {curOwner}",
+          "url": "",
+          "thumbnail": "",
+          "image": "",
+          "author": {
+            "name": "",
+            "icon": ""
+          },
+          "footer": {
+            "text": "Thao tác liên tục tại đây mà không đóng bảng hay spam kênh!",
+            "icon": ""
+          },
+          "timestamp": false,
+          "fields": []
+        },
+        "rows": [
+          [
+            {
+              "label": "▶️ Chạy",
+              "emoji": "▶️",
+              "style": "success",
+              "action": {
+                "type": "vm",
+                "value": "start"
+              }
+            },
+            {
+              "label": "🔄 Khởi Động Lại",
+              "emoji": "🔄",
+              "style": "primary",
+              "action": {
+                "type": "vm",
+                "value": "restart"
+              }
+            },
+            {
+              "label": "🛑 Tắt Máy",
+              "emoji": "🛑",
+              "style": "danger",
+              "action": {
+                "type": "vm",
+                "value": "stop"
+              }
+            },
+            {
+              "label": "🔄 Lấy Lại ID/PIN",
+              "emoji": "🔄",
+              "style": "secondary",
+              "action": {
+                "type": "vm",
+                "value": "reload_info"
+              }
+            }
+          ],
+          [
+            {
+              "label": "1 Giờ",
+              "emoji": "⏱️",
+              "style": "secondary",
+              "action": {
+                "type": "set_dur",
+                "value": "1h"
+              }
+            },
+            {
+              "label": "3 Giờ",
+              "emoji": "⏱️",
+              "style": "secondary",
+              "action": {
+                "type": "set_dur",
+                "value": "3h"
+              }
+            },
+            {
+              "label": "5 Giờ",
+              "emoji": "⏱️",
+              "style": "secondary",
+              "action": {
+                "type": "set_dur",
+                "value": "5h"
+              }
+            }
+          ],
+          [
+            {
+              "label": "Aistv2026",
+              "emoji": "🔑",
+              "style": "secondary",
+              "action": {
+                "type": "set_pin",
+                "value": "Aistv2026"
+              }
+            },
+            {
+              "label": "Admin8888",
+              "emoji": "🔑",
+              "style": "secondary",
+              "action": {
+                "type": "set_pin",
+                "value": "Admin8888"
+              }
+            },
+            {
+              "label": "Game2026",
+              "emoji": "🔑",
+              "style": "secondary",
+              "action": {
+                "type": "set_pin",
+                "value": "Game2026"
+              }
+            },
+            {
+              "label": "ProGamer1",
+              "emoji": "🔑",
+              "style": "secondary",
+              "action": {
+                "type": "set_pin",
+                "value": "ProGamer1"
+              }
+            },
+            {
+              "label": "🎲 Random",
+              "emoji": "🎲",
+              "style": "secondary",
+              "action": {
+                "type": "set_pin",
+                "value": "random"
+              }
+            }
+          ],
+          [
+            {
+              "label": "◀️ Máy Trước",
+              "emoji": "◀️",
+              "style": "secondary",
+              "action": {
+                "type": "nav",
+                "value": "prev"
+              }
+            },
+            {
+              "label": "▶️ Máy Sau",
+              "emoji": "▶️",
+              "style": "secondary",
+              "action": {
+                "type": "nav",
+                "value": "next"
+              }
+            },
+            {
+              "label": "👁️ Hiện/Ẩn PIN",
+              "emoji": "👁️",
+              "style": "secondary",
+              "action": {
+                "type": "toggle_pin",
+                "value": "toggle"
+              }
+            },
+            {
+              "label": "❌ Đóng",
+              "emoji": "❌",
+              "style": "danger",
+              "action": {
+                "type": "panel",
+                "value": "close"
+              }
+            }
+          ]
+        ]
+      }
+    ],
+    "config": {
+      "storageRepo": "ddvdat-glitch/rdp",
+      "runnerRepo": "ohohhoho82-alt/app",
+      "token": "",
+      "rootAdmin": "946662197168341053",
+      "duckdnsDomain": "datdemo.duckdns.org"
+    },
+    "machines": {}
   }
 }

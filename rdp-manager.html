@@ -1,789 +1,442 @@
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>☯ Quản Lý Máy Ảo GameViewer & StarDesk</title>
-  <style>
-    :root {
-      --bg: #0a0a14;
-      --card: rgba(255, 255, 255, 0.045);
-      --card-hover: rgba(255, 255, 255, 0.075);
-      --bd: rgba(255, 255, 255, 0.09);
-      --in: #12121f;
-      --tx: #eceaf7;
-      --mu: #8c89a8;
-      --ac: #8b5cf6;
-      --ac2: #6366f1;
-      --rd: #ef4444;
-      --gr: #22c55e;
-      --am: #fbbf24;
-      --bl: #38bdf8;
-    }
-    * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-    body {
-      margin: 0;
-      font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-      color: var(--tx);
-      background: radial-gradient(1200px 600px at 10% -10%, #2a1a5e55, transparent),
-                  radial-gradient(900px 500px at 100% 0, #0e2a5e44, transparent),
-                  var(--bg);
-      min-height: 100vh;
-    }
-    .w { max-width: 1280px; margin: auto; padding: 14px 16px 80px; }
-    header {
-      position: sticky; top: 0; z-index: 20;
-      background: #0a0a14e6; backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--bd);
-      margin: 0 -16px; padding: 12px 20px;
-    }
-    .top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    .sp { flex: 1; }
-    h1 {
-      font-size: 19px; margin: 0; font-weight: 800;
-      background: linear-gradient(90deg, #c4b5fd, #93c5fd);
-      -webkit-background-clip: text; background-clip: text; color: transparent;
-      display: inline;
-    }
-    .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-    .tabs button {
-      background: transparent; border: 1px solid var(--bd); color: var(--mu);
-      padding: 7px 15px; border-radius: 9px; cursor: pointer; font-weight: 600;
-      transition: .15s all;
-    }
-    .tabs button:hover { background: rgba(255,255,255,.05); color: var(--tx); }
-    .tabs button.on {
-      background: linear-gradient(135deg, var(--ac), var(--ac2));
-      color: #fff; border-color: transparent;
-      box-shadow: 0 4px 15px rgba(139, 92, 246, 0.35);
-    }
-    .card {
-      background: var(--card); border: 1px solid var(--bd); border-radius: 14px;
-      padding: 16px; margin: 14px 0;
-    }
-    .stats-bar { display: flex; gap: 12px; flex-wrap: wrap; margin: 14px 0; }
-    .stat-box {
-      flex: 1; min-width: 140px; background: rgba(255,255,255,.03);
-      border: 1px solid var(--bd); border-radius: 12px; padding: 12px 14px;
-    }
-    .stat-box .lbl { font-size: 11.5px; color: var(--mu); text-transform: uppercase; letter-spacing: .04em; }
-    .stat-box .num { font-size: 20px; font-weight: 800; color: #fff; margin-top: 3px; }
-    .badge {
-      display: inline-block; border-radius: 20px; padding: 2px 9px;
-      font-size: 11.5px; font-weight: 600; background: #2a2a3d; color: #cfcbe8;
-    }
-    .badge.on { background: rgba(34,197,94,.18); color: #4ade80; border: 1px solid rgba(34,197,94,.3); }
-    .badge.off { background: rgba(239,68,68,.18); color: #f87171; border: 1px solid rgba(239,68,68,.3); }
-    .badge.wait { background: rgba(251,191,36,.18); color: #fbbf24; border: 1px solid rgba(251,191,36,.3); }
-    .badge.ver { background: rgba(139,92,246,.2); color: #c4b5fd; border: 1px solid rgba(139,92,246,.35); }
-    button {
-      background: linear-gradient(135deg, var(--ac), var(--ac2));
-      color: #fff; border: 0; border-radius: 8px; padding: 7px 14px;
-      cursor: pointer; font: inherit; font-weight: 600; transition: .15s all;
-    }
-    button:hover { filter: brightness(1.15); }
-    button.s { background: #232336; border: 1px solid var(--bd); color: var(--tx); }
-    button.d { background: linear-gradient(135deg, #b91c1c, #dc2626); }
-    button.g { background: linear-gradient(135deg, #15803d, #16a34a); }
-    button.warn { background: linear-gradient(135deg, #b45309, #d97706); }
-    button.sm { padding: 4px 9px; font-size: 12px; }
-    button.copy-btn {
-      background: rgba(255,255,255,.08); border: 1px solid var(--bd);
-      padding: 2px 7px; font-size: 11px; border-radius: 6px; margin-left: 5px;
-    }
-    input, select, textarea {
-      background: var(--in); color: var(--tx); border: 1px solid var(--bd);
-      border-radius: 8px; padding: 8px 12px; font: inherit; outline: none;
-    }
-    input:focus, select:focus, textarea:focus {
-      border-color: var(--ac); box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.25);
-    }
-    .grid-vms {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-      gap: 16px; margin-top: 14px;
-    }
-    .vm-card {
-      background: rgba(255,255,255,.035); border: 1px solid var(--bd);
-      border-radius: 14px; padding: 16px; display: flex; flex-direction: column;
-      gap: 10px; position: relative; transition: .2s all;
-    }
-    .vm-card:hover {
-      border-color: rgba(139, 92, 246, 0.4);
-      background: rgba(255,255,255,.05);
-      box-shadow: 0 8px 25px rgba(0,0,0,.35);
-    }
-    .vm-card .head {
-      display: flex; justify-content: space-between; align-items: flex-start;
-      border-bottom: 1px solid rgba(255,255,255,.06); padding-bottom: 8px;
-    }
-    .vm-card .title { font-size: 16px; font-weight: 700; color: #fff; }
-    .vm-card .slug { font-size: 12px; color: var(--mu); }
-    .prop-row {
-      display: flex; justify-content: space-between; font-size: 13px;
-      align-items: center; padding: 2px 0;
-    }
-    .prop-row .lbl { color: var(--mu); }
-    .prop-row .val { color: var(--tx); font-weight: 500; font-family: Consolas, monospace; }
-    .actions-row {
-      display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;
-      border-top: 1px solid rgba(255,255,255,.06); padding-top: 10px;
-    }
-    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
-    .chip {
-      background: rgba(255,255,255,.06); border: 1px solid var(--bd);
-      border-radius: 7px; padding: 4px 10px; font-size: 12px;
-      cursor: pointer; transition: .15s all;
-    }
-    .chip:hover { background: rgba(139,92,246,.2); border-color: var(--ac); }
-    .chip.on {
-      background: linear-gradient(135deg, var(--ac), var(--ac2));
-      color: #fff; border-color: transparent;
-    }
-    table.t { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
-    table.t th, table.t td { padding: 9px 12px; border-bottom: 1px solid var(--bd); text-align: left; }
-    table.t th { color: var(--mu); font-weight: 600; font-size: 11.5px; text-transform: uppercase; }
-    .toast {
-      position: fixed; right: 24px; bottom: 24px; z-index: 9999;
-      background: #181829; border: 1px solid rgba(139, 92, 246, 0.5);
-      color: #fff; padding: 12px 20px; border-radius: 12px;
-      box-shadow: 0 10px 35px rgba(0,0,0,.6); font-size: 14px; font-weight: 500;
-      display: none; animation: slideIn .2s ease-out;
-    }
-    @keyframes slideIn { from { transform: translateY(15px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-    .modal-bg {
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,.75); backdrop-filter: blur(8px);
-      z-index: 100; display: none; place-items: center;
-    }
-    .modal-box {
-      background: #131322; border: 1px solid var(--bd);
-      border-radius: 16px; padding: 22px; width: 95%; max-width: 520px;
-      box-shadow: 0 20px 50px #000;
-    }
-    .g2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 14px; }
-    .g2 .wide { grid-column: 1 / -1; }
-    label { display: block; color: var(--mu); font-size: 11.5px; margin-bottom: 3px; text-transform: uppercase; }
-  </style>
-</head>
-<body>
-  <div class="w">
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>☯ Quản Lý Máy Ảo & Lệnh RDP — Cấu hình hệ thống</title>
+<style>
+:root{--bg:#0a0a14;--card:rgba(255,255,255,.045);--bd:rgba(255,255,255,.09);--in:#12121f;--tx:#eceaf7;--mu:#8c89a8;--ac:#8b5cf6;--ac2:#6366f1;--rd:#ef4444;--gr:#22c55e;--am:#fbbf24}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--tx);background:radial-gradient(1200px 600px at 10% -10%,#2a1a5e55,transparent),radial-gradient(900px 500px at 100% 0,#0e2a5e44,transparent),var(--bg);min-height:100vh}
+.w{max-width:1280px;margin:auto;padding:14px 16px 60px}
+header{position:sticky;top:0;z-index:20;background:#0a0a14e6;backdrop-filter:blur(10px);border-bottom:1px solid var(--bd);margin:0 -16px;padding:10px 16px}
+h1{font-size:19px;margin:0;font-weight:700;background:linear-gradient(90deg,#c4b5fd,#93c5fd);-webkit-background-clip:text;background-clip:text;color:transparent;display:inline}
+.top{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.sp{flex:1}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.tabs button{background:transparent;border:1px solid var(--bd);color:var(--mu)}
+.tabs button.on{background:linear-gradient(135deg,var(--ac),var(--ac2));color:#fff;border-color:transparent}
+button{background:linear-gradient(135deg,var(--ac),var(--ac2));color:#fff;border:0;border-radius:8px;padding:6px 13px;cursor:pointer;font:inherit;font-weight:600}
+button:hover{filter:brightness(1.12)}button.s{background:#2a2a3d;font-weight:500}button.d{background:#7f1d1d}button.g{background:#15803d}button.warn{background:#b45309}button.sm{padding:2px 8px;font-size:12px}
+input,select,textarea{background:var(--in);color:var(--tx);border:1px solid var(--bd);border-radius:7px;padding:6px 9px;font:inherit;max-width:100%}
+input:focus,select:focus,textarea:focus{outline:2px solid #8b5cf666;border-color:var(--ac)}
+textarea{width:100%;min-height:70px;resize:vertical}textarea.code{font:12.5px/1.5 Consolas,monospace;min-height:260px;white-space:pre;tab-size:4}
+input[type=color]{padding:0;width:38px;height:30px}input[type=checkbox]{width:16px;height:16px;accent-color:var(--ac)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin:12px 0}
+.g2{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px 12px}.g2 .wide{grid-column:1/-1}.g2 input:not([type=checkbox]):not([type=color]),.g2 select{width:100%}
+label{display:block;color:var(--mu);font-size:11.5px;margin-bottom:2px;text-transform:uppercase;letter-spacing:.04em}label input,label select{width:100%;text-transform:none;letter-spacing:0}
+.mu{color:var(--mu);font-size:12.5px}.r{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.badge{display:inline-block;border-radius:20px;padding:1px 9px;font-size:11px;background:#2a2a3d;color:#cfcbe8;margin-right:4px}
+.badge.on{background:rgba(34,197,94,.18);color:#4ade80;border:1px solid rgba(34,197,94,.3)}
+.badge.off{background:rgba(239,68,68,.18);color:#f87171;border:1px solid rgba(239,68,68,.3)}
+.badge.wait{background:rgba(251,191,36,.18);color:#fbbf24;border:1px solid rgba(251,191,36,.3)}
+table.t{width:100%;border-collapse:collapse;font-size:13px}table.t td,table.t th{padding:6px 9px;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top}table.t th{color:var(--mu);font-weight:500;font-size:11.5px;text-transform:uppercase}
+.hint{background:#8b5cf61a;border:1px solid #8b5cf644;border-radius:10px;padding:8px 12px;color:#d4cbff;font-size:12.5px;margin:8px 0}
+
+/* ---------- Trình thiết kế menu kiểu Canva ---------- */
+.ds{display:grid;grid-template-columns:220px minmax(0,1fr) 340px;gap:12px;align-items:start}
+@media(max-width:1000px){.ds{grid-template-columns:1fr}}
+.pnl input:not([type=checkbox]):not([type=color]),.pnl textarea,.pnl select{width:100%}.pnl{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px}.sticky{position:sticky;top:112px}
+.ml{display:flex;flex-direction:column;gap:5px}.ml button{text-align:left;background:#1c1c2e;font-weight:500}.ml button.on{background:linear-gradient(135deg,var(--ac),var(--ac2))}
+.stage{background:repeating-conic-gradient(#14141f 0 25%,#10101a 0 50%) 0 0/22px 22px;border:1px dashed #ffffff22;border-radius:14px;padding:22px 14px;min-height:420px}
+.dc{max-width:560px;margin:auto;background:#313338;border-radius:8px;padding:14px 16px;color:#dbdee1;font:15px/1.4 "gg sans",system-ui,sans-serif;box-shadow:0 10px 40px #0008}
+.dch{display:flex;align-items:center;gap:8px;margin-bottom:6px}.av{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#5865f2,#8b5cf6);display:grid;place-items:center;font-size:20px}.dch b{color:#fff}.bt{background:#5865f2;color:#fff;font-size:10px;padding:0 5px;border-radius:4px;font-style:normal;line-height:16px}
+.el{border-radius:5px;cursor:pointer;outline:2px solid transparent;outline-offset:2px;transition:.12s;min-height:4px}.el:hover{outline-color:#8b5cf666}.el.on{outline-color:#a78bfa;background:#8b5cf61f}
+.ph{color:#80848e;font-style:italic;font-size:13px}
+.emb{background:#2b2d31;border-left:4px solid var(--ac);border-radius:4px;padding:10px 14px 12px;margin:6px 0;max-width:520px;position:relative}.emb.on{outline:2px solid #a78bfa;outline-offset:2px}
+.emb .tt{color:#fff;font-weight:700;font-size:16px;margin:2px 0}.emb .ds_{font-size:14px;margin:4px 0;color:#dbdee1}.emb .fo{font-size:12px;color:#b5bac1;margin-top:8px}
+.emb .au{font-size:13px;font-weight:600;color:#fff}.emb img{max-width:100%;border-radius:6px;margin-top:8px}.th{position:absolute;right:12px;top:12px;width:64px;height:64px;border-radius:6px;background:#3a3c43;display:grid;place-items:center;color:#888;font-size:11px;overflow:hidden}.th img{margin:0;width:100%;height:100%;object-fit:cover}
+.flds{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:8px}.fld{flex:1 1 100%;padding:2px 4px}.fld.in{flex:1 1 30%;min-width:110px}.fld b{display:block;color:#fff;font-size:13px}.fld div{font-size:13.5px}
+.rowb{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;padding:3px;border-radius:6px;min-height:34px;align-items:center}.rowb:hover{background:#ffffff08}
+.dbtn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:4px;color:#fff;font-size:14px;font-weight:500;cursor:pointer;user-select:none}
+.addb,.newrow{color:#a78bfa;border:1px dashed #a78bfa88;border-radius:5px;padding:4px 10px;cursor:pointer;font-size:12.5px}.newrow{display:block;text-align:center;margin-top:10px}.addb:hover,.newrow:hover{background:#8b5cf622}
+.dragover{outline:2px dashed #34d399!important}
+.sw{display:inline-block;width:22px;height:22px;border-radius:6px;cursor:pointer;border:2px solid transparent;vertical-align:middle}.sw:hover{border-color:#fff}.sw.on{border-color:#fff}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}.chip{background:#23233a;border:1px solid var(--bd);border-radius:6px;padding:1px 7px;font:11.5px Consolas,monospace;cursor:pointer;color:#c4b5fd}.chip:hover{background:#34345a}
+.pill{display:inline-block;padding:3px 10px;border-radius:6px;font-size:12px;color:#fff;cursor:pointer;margin:2px;border:2px solid transparent}.pill.on{border-color:#fff}
+.toast{position:fixed;right:18px;bottom:18px;background:#1c1c2e;border:1px solid var(--bd);padding:10px 16px;border-radius:10px;z-index:99;box-shadow:0 8px 30px #000a}
+
+/* Grid máy ảo */
+.grid-vms{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;margin-top:10px}
+.vm-card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.vm-card:hover{border-color:var(--ac)}
+.prop{display:flex;justify-content:space-between;align-items:center;font-size:13px}
+.prop .l{color:var(--mu)} .prop .v{font-family:Consolas,monospace;font-weight:600}
+</style></head><body><div class="w"><div id="app"></div></div><div id="toast" class="toast" style="display:none"></div>
+<script>
+const $=id=>document.getElementById(id);
+let pw=sessionStorage.rdp_pw||'',T=null,CH={},META={},tab='vms',MI=0,SEL={k:'embed'},SV={},DR=null,LF=null,isDirty=false,SENDCH='',pinMask=true;
+
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num=v=>v===''||isNaN(+v)?0:+v;
+
+async function api(m,u,b){
+  const r=await fetch(u,{
+    method:m,
+    headers:{'Content-Type':'application/json','x-admin-password':pw,'x-password':pw},
+    body:b?JSON.stringify(b):undefined
+  });
+  if(!r.ok){let e='Lỗi '+r.status;try{e=(await r.json()).error||e}catch{}throw new Error(e)}
+  return r.json();
+}
+
+function toast(t,ms=2400){
+  const e=$('toast');e.textContent=t;e.style.display='block';
+  clearTimeout(toast.t);toast.t=setTimeout(()=>e.style.display='none',ms);
+}
+
+async function init(){
+  try{
+    const d=await api('GET','/api/rdp/full?pass='+encodeURIComponent(pw));
+    T=d.rdp||{};
+    T.commands=T.commands||[];
+    T.menus=T.menus||[];
+    T.config=T.config||{storageRepo:'ddvdat-glitch/rdp',runnerRepo:'ohohhoho82-alt/app',token:'',rootAdmin:'946662197168341053'};
+    T.machines=T.machines||{};
+    CH=d.channels||{};
+    META=d;
+    sessionStorage.rdp_pw=pw;
+    await loadVars();
+    draw();
+  }catch(e){login(e.message)}
+}
+
+function login(m){
+  $('app').innerHTML=`<div class="card" style="max-width:380px;margin:12vh auto"><h1>☯ Quản Lý Máy Ảo</h1><p class="mu">Nhập mật khẩu quản trị (ADMIN_PASSWORD của bot)</p><div class="r"><input id="p" type="password" style="flex:1" onkeydown="if(event.key=='Enter'){pw=this.value;init()}"><button onclick="pw=$('p').value;init()">Vào</button></div>${m&&pw?`<p style="color:#f87171">${esc(m)}</p>`:''}</div>`;
+}
+
+// ---------- Dữ liệu & Lưu 2 chiều ----------
+const G=p=>p.split('.').reduce((o,k)=>o?.[k],T);
+function S(p,v){
+  const k=p.split('.');let o=T;
+  for(let i=0;i<k.length-1;i++)o=o[k[i]];
+  o[k.at(-1)]=v;
+  dirty(true);
+  after(p);
+}
+function dirty(f){
+  isDirty=f;const b=$('sv');
+  if(b){b.textContent=f?'💾 Lưu (chưa lưu)':'✔ Đã lưu';b.className=f?'':'s'}
+}
+function after(p){
+  if(p.startsWith('menus.')&&tab=='menus'){const c=$('cv');if(c)c.innerHTML=canvas()}
+}
+async function save(){
+  try{
+    const r=await api('PUT','/api/rdp/full?pass='+encodeURIComponent(pw),T);
+    T=r.rdp;dirty(false);
+    toast('✔ Đã lưu vào data.json — áp dụng ngay cho bot Discord!');
+    if(tab=='menus')await loadVars();
+    draw();
+  }catch(e){toast('❌ '+e.message,4000)}
+}
+window.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key=='s'){e.preventDefault();save()}});
+window.addEventListener('beforeunload',e=>{if(isDirty){e.preventDefault();e.returnValue=''}});
+
+// ---------- Ô nhập liệu hỗ trợ ----------
+const inp=(p,o={})=>{const v=G(p),n=o.n;return `<input id="i_${p}" ${o.t=='color'?'type=color':''} style="${o.w?'width:'+o.w:''}" value="${esc(v)}" placeholder="${esc(o.ph||'')}" oninput="S('${p}',${n?'num(this.value)':'this.value'})">`};
+const lab=(t,h)=>`<label>${t}${h}</label>`;
+const sel=(p,opts,o={})=>`<select onchange="S('${p}',${o.n?'+this.value':'this.value'});${o.redraw?'draw()':''}">${opts.map(([a,b])=>`<option value="${esc(a)}" ${String(a)==String(G(p))?'selected':''}>${esc(b)}</option>`).join('')}</select>`;
+const chk=(p,t,rd)=>`<label style="display:flex;gap:6px;align-items:center;text-transform:none;font-size:13px;color:var(--tx)"><input type=checkbox ${G(p)?'checked':''} onchange="S('${p}',this.checked);${rd?'draw()':''}">${t}</label>`;
+const ta=(p,o={})=>`<textarea id="i_${p}" class="${o.c||''}" oninput="S('${p}',${o.lines?"this.value.split('\\n')":'this.value'})" placeholder="${esc(o.ph||'')}">${esc(o.lines?(G(p)||[]).join('\n'):G(p))}</textarea>`;
+const allRoles=()=>Object.entries(META.roles||{}).flatMap(([g,x])=>(x.roles||[]).filter(r=>r.name!='@everyone').map(r=>({...r,gid:g,gname:x.name})));
+const roleOpts=()=>allRoles().map(r=>[r.id,r.name]);
+const rname=id=>{const r=allRoles().find(x=>x.id==id);return r?r.name:id};
+const chanOpts=()=>Object.values(CH).flatMap(x=>(x.channels||[]).map(c=>[c.id,'#'+c.name]));
+const rolePick=p=>{const cur=G(p)||[];return `<div class="chips" style="margin:0 0 5px">${cur.map((id,i)=>`<span class="chip" title="bỏ" onclick="S('${p}',G('${p}').filter((_,j)=>j!=${i}));draw()">${esc(rname(id))} ✕</span>`).join('')||'<span class="mu">(chưa chọn)</span>'}</div><select onchange="if(this.value){S('${p}',[...(G('${p}')||[]),this.value]);draw()}"><option value="">＋ thêm role…</option>${allRoles().filter(r=>!cur.includes(r.id)).map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select>`};
+
+const mv=(arr,i,d)=>{const j=i+d;if(j<0||j>=arr.length)return;[arr[i],arr[j]]=[arr[j],arr[i]];dirty(true);draw()};
+const rm=(arr,i,what)=>{if(confirm('Xóa '+what+'?')){arr.splice(i,1);dirty(true);if(arr===T.menus){MI=Math.max(0,Math.min(MI,arr.length-1));SEL={k:'embed'}}draw()}};
+
+// ================= KHUNG CHÍNH & TABS =================
+const TABS=[
+  ['vms','🖥️ Máy ảo'],
+  ['cmds','⌨️ Lệnh'],
+  ['menus','🎨 Thiết kế Menu'],
+  ['scan','🔄 Quét & Tái tạo YML'],
+  ['create','➕ Tạo máy mới'],
+  ['set','⚙️ Cài đặt']
+];
+
+function draw(){
+  const y=scrollY;
+  $('app').innerHTML=`
     <header>
       <div class="top">
-        <h1>☯ Quản Lý Máy Ảo GameViewer & StarDesk</h1>
-        <span class="mu">Phiên bản Tu Tiên UI · 2-Repo Storage</span>
-        <span class="sp"></span>
-        <input type="password" id="admin_pw" placeholder="Mật khẩu Admin" style="width:160px;padding:5px 9px;font-size:13px">
-        <button class="sm" onclick="init()">🔄 Đồng Bộ</button>
-        <span id="sync_status" class="mu" style="font-size:12px"></span>
+        <h1>☯ Quản Lý Máy Ảo & Lệnh RDP · Cấu hình hệ thống</h1>
+        <span class="mu">dùng chung <code>data.json</code></span><span class="sp"></span>
+        <span class="mu">${META.botReady?'🟢 bot online':'🔴 bot chưa online'}</span>
+        <a class="mu" href="#" onclick="location.href=location.protocol+'//'+location.hostname+':3000';return false">← Quản trị bot</a>
+        <button id="sv" class="${isDirty?'':'s'}" onclick="save()">${isDirty?'💾 Lưu (chưa lưu)':'✔ Đã lưu'}</button>
       </div>
-      <div class="tabs">
-        <button id="tb_vms" class="on" onclick="switchTab('vms')">🖥️ Danh Sách Máy (<span id="cnt_tab_vms">0</span>)</button>
-        <button id="tb_scan" onclick="switchTab('scan')">🔄 Quét & Tái Tạo YML (<span id="cnt_tab_scan">0</span>)</button>
-        <button id="tb_create" onclick="switchTab('create')">➕ Tạo Máy Mới</button>
-        <button id="tb_config" onclick="switchTab('config')">⚙️ Cấu Hình 2-Repo & Git</button>
-        <a href="/rdp-files" style="text-decoration:none;align-self:center;margin-left:6px"><button class="s sm" style="color:#a7f3d0;border-color:#059669">📥 Quản Lý File Máy Ảo →</button></a>
-      </div>
+      <div class="tabs">${TABS.map(([k,l])=>`<button class="${tab==k?'on':''}" onclick="go('${k}')">${l}</button>`).join('')}</div>
     </header>
+    ${({vms:tVms,cmds:tCmds,menus:tMenus,scan:tScan,create:tCreate,set:tSet})[tab]()}`;
+  scrollTo(0,y);
+}
+async function go(t){tab=t;if(t=='menus')await loadVars();draw()}
 
-    <!-- THANH THỐNG KÊ NHANH -->
-    <div class="stats-bar">
-      <div class="stat-box">
-        <div class="lbl">🟢 Đang Online</div>
-        <div class="num" id="st_online" style="color:#4ade80">0</div>
+// ================= TAB 1: DANH SÁCH MÁY ẢO =================
+function tVms(){
+  const vms=Object.values(T.machines||{});
+  let on=0,off=0;
+  vms.forEach(m=>{if(m.isOnline)on++;else off++});
+  return `
+    <div class="r" style="margin-top:12px;justify-content:space-between">
+      <div class="r">
+        <span class="badge on">🟢 Online: ${on}</span>
+        <span class="badge off">🔴 Offline: ${off}</span>
+        <span class="badge">📦 Tổng: ${vms.length} máy</span>
+        <span class="mu">Kho Lưu: <code>${T.config?.storageRepo||'ddvdat-glitch/rdp'}</code></span>
+        <span class="mu">Treo Tại: <code>${T.config?.runnerRepo||'ohohhoho82-alt/app'}</code></span>
       </div>
-      <div class="stat-box">
-        <div class="lbl">🔴 Đã Offline / Tắt</div>
-        <div class="num" id="st_offline" style="color:#f87171">0</div>
-      </div>
-      <div class="stat-box">
-        <div class="lbl">📦 Tổng Số Máy Ảo</div>
-        <div class="num" id="st_total">0</div>
-      </div>
-      <div class="stat-box">
-        <div class="lbl">🏃 Runner Repo (Treo Máy)</div>
-        <div class="num" id="st_runner" style="font-size:14px;word-break:break-all;color:#38bdf8">-</div>
-      </div>
-      <div class="stat-box">
-        <div class="lbl">💽 Storage Repo (Kho Gốc)</div>
-        <div class="num" id="st_storage" style="font-size:14px;word-break:break-all;color:#c4b5fd">-</div>
-      </div>
-    </div>
-
-    <!-- TAB 1: DANH SÁCH MÁY ẢO -->
-    <div id="pnl_vms">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
-        <input id="vm_search" placeholder="🔍 Tìm máy theo tên, id, chủ sở hữu..." oninput="renderVms()" style="width:280px">
-        <div style="display:flex;gap:6px">
-          <button class="s sm" onclick="togglePinMask()"><span id="lbl_pin_toggle">🙈 Ẩn Mã PIN</span></button>
-          <button class="s sm" onclick="loadState()">🔄 Tải Lại</button>
-        </div>
-      </div>
-      <div class="grid-vms" id="vms_container">
-        <div class="card wide" style="text-align:center;color:var(--mu);padding:40px">Đang tải dữ liệu máy ảo...</div>
+      <div class="r">
+        <button class="s sm" onclick="pinMask=!pinMask;draw()">${pinMask?'👁️ Hiện PIN':'🙈 Ẩn PIN'}</button>
+        <button class="s sm" onclick="init()">🔄 Làm mới</button>
       </div>
     </div>
-
-    <!-- TAB 2: QUÉT & TÁI TẠO WORKFLOWS -->
-    <div id="pnl_scan" style="display:none">
-      <div class="card">
-        <h2 style="margin:0 0 8px 0;font-size:16px;color:#c4b5fd">🔄 Quét Kho Runner & Tái Tạo Workflows Chuẩn Mới Nhất</h2>
-        <p class="mu" style="margin:0 0 12px 0">Quét toàn bộ các file <code>.github/workflows/*.yml</code> trên Repo Treo Máy. Hệ thống sẽ trích xuất tên máy, thời lượng, mã PIN và cho phép bạn nâng cấp toàn bộ sang bản <code>taomay.yml</code> mới nhất (GameViewer 4.43.1 + StarDesk 1.5.3 + Bảo toàn DPAPI session + SID cleanup).</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button onclick="scanWorkflows()">🔍 Quét Ngay Kho Treo Máy</button>
-          <button class="g" onclick="rebuildWorkflows('all')">🚀 Nâng Cấp Toàn Bộ Theo Bản Mới Nhất</button>
-          <span id="scan_msg" class="mu" style="font-size:12.5px"></span>
+    <div class="grid-vms">
+      ${vms.length?vms.map(m=>`
+        <div class="vm-card">
+          <div class="r" style="justify-content:space-between">
+            <b>${esc(m.displayName||m.name)}</b>
+            <span class="badge ${m.isOnline?'on':'off'}">${m.isOnline?'🟢 Online':'🔴 Offline'}</span>
+          </div>
+          <div class="prop"><span class="l">ID Định Danh:</span><span class="v"><code>${esc(m.name)}</code></span></div>
+          <div class="prop"><span class="l">GameViewer ID:</span><span class="v"><code>${esc(m.gvId||'(Đang kết nối)')}</code></span></div>
+          <div class="prop"><span class="l">Mã PIN:</span><span class="v"><code>${pinMask?'••••••••':esc(m.gvPin||'Aistv2026')}</code></span></div>
+          <div class="prop"><span class="l">StarDesk ID:</span><span class="v"><code>${esc(m.stardeskId||'-')}</code></span></div>
+          <div class="prop"><span class="l">Thời gian:</span><span class="v" style="color:#fbbf24">${esc(m.duration||'5h00m')}</span></div>
+          <div class="prop"><span class="l">Chủ sở hữu:</span><span class="v">${esc(m.owner||m.ownerId||'Chưa gán')}</span></div>
+          <div class="r" style="margin-top:6px">
+            <button class="g sm" onclick="vmControl('${m.name}','start')">▶️ Chạy</button>
+            <button class="warn sm" onclick="vmControl('${m.name}','restart')">🔄 Khởi động</button>
+            <button class="d sm" onclick="vmControl('${m.name}','stop')">🛑 Tắt</button>
+            <button class="s sm" onclick="promptVm('${m.name}')">📝 Prompt</button>
+            <button class="d sm" onclick="vmControl('${m.name}','delete')">🗑️</button>
+          </div>
         </div>
-        <div style="overflow-x:auto">
-          <table class="t" id="tbl_scan">
-            <thead>
-              <tr>
-                <th>Tệp Workflow</th>
-                <th>Tên Máy / Định Danh</th>
-                <th>Thời Lượng</th>
-                <th>Mã PIN</th>
-                <th>Phiên Bản Template</th>
-                <th>Lần Chạy Gần Nhất</th>
-                <th>Thao Tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td colspan="7" style="text-align:center;color:var(--mu)">Bấm "Quét Ngay" để quét các file trên Runner Repo.</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+      `).join(''):'<div class="card wide" style="text-align:center;color:var(--mu);padding:40px">Chưa có máy ảo nào trong hệ thống. Bấm tab [➕ Tạo máy mới] để khởi tạo!</div>'}
     </div>
+  `;
+}
 
-    <!-- TAB 3: TẠO MÁY MỚI -->
-    <div id="pnl_create" style="display:none">
-      <div class="card" style="max-width:720px;margin:auto">
-        <h2 style="margin:0 0 12px 0;font-size:16px;color:#c4b5fd">➕ Khởi Tạo Máy Ảo Mới Trên Runner Repo</h2>
-        <div class="g2">
-          <div>
-            <label>Tên định danh máy (slug)</label>
-            <input id="cr_name" placeholder="VD: may-game-1">
-          </div>
-          <div>
-            <label>Tên hiển thị</label>
-            <input id="cr_display" placeholder="VD: Máy Game 1">
-          </div>
-          <div class="wide">
-            <label>Thời lượng sử dụng</label>
-            <div class="chips" id="dur_chips">
-              <span class="chip" onclick="setDur('1h', this)">1 Giờ (1h)</span>
-              <span class="chip" onclick="setDur('3h', this)">3 Giờ (3h)</span>
-              <span class="chip on" onclick="setDur('5h00m', this)">5 Giờ (5h00m)</span>
-            </div>
-            <input type="hidden" id="cr_dur" value="5h00m">
-          </div>
-          <div class="wide">
-            <label>Mã PIN GameViewer (8-16 ký tự chữ & số)</label>
-            <div class="chips" id="pin_chips">
-              <span class="chip on" onclick="setPin('Aistv2026', this)">Aistv2026</span>
-              <span class="chip" onclick="setPin('Admin8888', this)">Admin8888</span>
-              <span class="chip" onclick="setPin('Game2026', this)">Game2026</span>
-              <span class="chip" onclick="setPin('ProGamer1', this)">ProGamer1</span>
-              <span class="chip" onclick="genRandomPin(this)">🎲 Ngẫu Nhiên</span>
-            </div>
-            <input id="cr_pin" value="Aistv2026" placeholder="Nhập PIN hoặc chọn mẫu">
-          </div>
-          <div>
-            <label>Nơi Treo Máy (Runner Repo)</label>
-            <input id="cr_runner" placeholder="VD: ohohhoho82-alt/app">
-          </div>
-          <div>
-            <label>Kho Lưu Trữ Ổ (Storage Repo)</label>
-            <input id="cr_storage" placeholder="VD: ddvdat-glitch/rdp">
-          </div>
-          <div class="wide">
-            <label>Discord User ID Chủ Sở Hữu (tùy chọn)</label>
-            <input id="cr_owner" placeholder="VD: 946662197168341053">
-          </div>
-        </div>
-        <p style="margin-top:16px">
-          <button onclick="createVmSubmit()" style="padding:10px 20px;font-size:15px">🚀 Tạo Máy & Khởi Chạy Ngay</button>
-          <span id="cr_msg" class="mu" style="margin-left:10px"></span>
-        </p>
-      </div>
+async function vmControl(name, act){
+  if(act==='delete'&&!confirm('Xóa máy ảo '+name+'?'))return;
+  toast('⏳ Đang gửi lệnh '+act+' cho máy '+name+'...');
+  try{
+    const r=await api('POST','/api/rdp/control-vm?pass='+encodeURIComponent(pw),{machine:name,action:act});
+    toast('✔ '+r.message);
+    await init();
+  }catch(e){toast('❌ '+e.message,4000)}
+}
+async function promptVm(name){
+  try{
+    const r=await api('GET','/api/rdp/prompt?machine='+encodeURIComponent(name)+'&pass='+encodeURIComponent(pw));
+    alert(r.prompt||'Chưa có auto-prompt cho máy '+name);
+  }catch(e){alert('Lỗi: '+e.message)}
+}
+
+// ================= TAB 2: QUẢN LÝ LỆNH (GIỐNG TU TIÊN) =================
+const CTN={menu:'Mở menu Discord',create:'Tạo máy ảo',restart:'Khởi động lại máy',stop:'Tắt máy ảo',scan:'Quét & nâng cấp YML',script:'Chạy Script (JS/Python)',reply:'Trả lời cố định'};
+const menuOpts=()=>[['','(mặc định)'],...T.menus.map(m=>[m.id,m.name])];
+
+function tCmds(){
+  return `<div class="hint">Lệnh nằm trong <code>data.json › rdp.commands</code>. Mỗi lệnh chọn <b>menu</b> dùng để hiển thị kết quả (thiết kế ở tab 🎨). Kiểu <code>script</code>: code chạy như script của bot. Phân quyền lệnh áp dụng chặt chẽ theo ID Admin hoặc Role Discord.</div>
+  ${T.commands.map((c,i)=>`<div class="card"><div class="r"><b>${esc(c.name)}</b><span class="badge">${esc(c.id)}</span><span class="badge">${esc(CTN[c.type]||c.type)}</span><span class="sp"></span>${chk(`commands.${i}.enabled`,'Bật')}<button class="s sm" onclick="mv(T.commands,${i},-1)">↑</button><button class="s sm" onclick="mv(T.commands,${i},1)">↓</button><button class="d sm" onclick="rm(T.commands,${i},'lệnh')">🗑</button></div>
+  <div class="g2" style="margin-top:8px">
+    <div>${lab('Tên','')}${inp(`commands.${i}.name`)}</div>
+    <div>${lab('Từ khóa kích hoạt','')}${inp(`commands.${i}.trigger`)}</div>
+    <div>${lab('Kiểu khớp','')}${sel(`commands.${i}.matchType`,[['exact','Đúng hoàn toàn'],['startsWith','Bắt đầu bằng'],['contains','Chứa'],['regex','Regex']])}</div>
+    <div>${lab('Hành động','')}${sel(`commands.${i}.type`,Object.entries(CTN),{redraw:1})}</div>
+    <div>${lab('Menu hiển thị kết quả','')}${sel(`commands.${i}.menu`,menuOpts())}</div>
+    <div>${lab('Hồi chiêu (giây)','')}${inp(`commands.${i}.cooldown`,{n:1})}</div>
+    <div>${lab('Cách trả lời','')}${sel(`commands.${i}.replyMode`,[['reply','Reply tin nhắn'],['send','Gửi tin mới']])}</div>
+    <div>${lab('Ai được dùng','')}${sel(`commands.${i}.access.mode`,[['all','Mọi người'],['roles','Chỉ các role chọn'],['staff','Chỉ Admin / Chủ server']],{redraw:1})}</div>
+    ${c.access&&c.access.mode=='roles'?`<div class="wide">${lab('Role được dùng','')}${rolePick(`commands.${i}.access.roleIds`)}</div>`:''}
+    <div class="wide">${lab('Role bị cấm','')}${rolePick(`commands.${i}.access.denyRoleIds`)}</div>
+    ${c.type=='reply'?`<div class="wide">${lab('Nội dung trả lời ({biến})','')}${ta(`commands.${i}.reply`)}</div>`:''}
+    ${c.type=='script'?`<div>${lab('Ngôn ngữ','')}${sel(`commands.${i}.language`,[['javascript','JavaScript'],['python','Python']])}</div><div>${lab('Giới hạn (ms)','')}${inp(`commands.${i}.timeoutMs`,{n:1})}</div><div class="wide">${lab('Code Script','')}${ta(`commands.${i}.code`,{c:'code'})}</div>`:''}
+  </div></div>`).join('')}
+  <button onclick="T.commands.push({id:'cmd_'+Date.now().toString(36).slice(-4),name:'Lệnh mới',trigger:'!may_moi',matchType:'exact',type:'menu',menu:'main',cooldown:3,enabled:true,replyMode:'reply',access:{mode:'all',roleIds:[],denyRoleIds:[]},language:'javascript',code:'',timeoutMs:5000});dirty(true);draw()">＋ Thêm lệnh mới</button>`;
+}
+
+// ================= TAB 3: THIẾT KẾ MENU CANVA (GIỐNG TU TIÊN) =================
+const SW=['#8b5cf6','#6366f1','#60a5fa','#2dd4bf','#34d399','#fbbf24','#fb923c','#f87171','#f472b6','#e5e7eb','#5865f2','#1f2937'];
+const BST={primary:'#5865f2',secondary:'#4e5058',success:'#248046',danger:'#da373c',link:'#4e5058'};
+const VARL=()=>['onlineCount','offlineCount','totalCount','runnerRepo','storageRepo','machineList','curMachineId','curDisplayName','curStatusBadge','curGvId','curDisplayPin','curStardeskId','curUser','curPass','curRemain','curOwner'];
+
+const fillv=s=>String(s??'').replace(/\{([\w.]+)\}/g,(m,k)=>k in SV?SV[k]:m);
+const md=s=>esc(s).replace(/\*\*(.+?)\*\*/gs,'<b>$1</b>').replace(/(^|[^*])\*(?!\s)(.+?)\*/g,'$1<i>$2</i>').replace(/__(.+?)__/g,'<u>$1</u>').replace(/`([^`]+)`/g,'<code style="background:#1e1f22;padding:0 4px;border-radius:3px">$1</code>').replace(/\n/g,'<br>');
+
+async function loadVars(){try{SV=await api('POST','/api/rdp/vars?pass='+encodeURIComponent(pw),{})}catch{SV={}}}
+const nid=p=>p+Date.now().toString(36).slice(-4);
+
+function tMenus(){
+  const m=T.menus[MI];
+  return `<div class="ds"><div class="pnl sticky"><div class="mu" style="margin-bottom:6px">DANH SÁCH MENU</div>
+  <div class="ml">${T.menus.map((x,i)=>`<button class="${i==MI?'on':''}" onclick="MI=${i};SEL={k:'embed'};draw()">🗂 ${esc(x.name)}</button>`).join('')}</div>
+  <p class="r"><button class="g sm" onclick="newMenu()">＋ Mới</button><button class="s sm" onclick="dupMenu()">⧉ Nhân bản</button><button class="d sm" onclick="rm(T.menus,MI,'menu này')">🗑</button></p><hr style="border-color:var(--bd)">
+  <div class="mu">THÊM KHỐI</div><p class="r"><button class="s sm" onclick="addField()">＋ Trường</button><button class="s sm" onclick="addBtn(-1)">＋ Nút</button><button class="s sm" onclick="addRow()">＋ Hàng nút</button></p>
+  <div class="mu" style="margin-top:10px">GỬI THỬ VÀO KÊNH</div>
+  <select id="chs" style="width:100%" onchange="SENDCH=this.value"><option value="">— chọn kênh —</option>${Object.entries(CH).map(([g,x])=>(x.channels||[]).map(c=>`<option value="${c.id}" ${c.id==SENDCH?'selected':''}>#${esc(c.name)}${Object.keys(CH).length>1?' ['+esc(x.name)+']':''}</option>`).join('')).join('')}</select>
+  <button class="sm" style="margin-top:5px;width:100%" onclick="sendMenu()">📤 Lưu &amp; gửi thử vào Discord</button></div>
+  <div><div class="stage"><div id="cv">${canvas()}</div></div><p class="mu">💡 Bấm vào bất kỳ phần nào trên Embed hoặc Nút để chỉnh bên phải · <b>kéo-thả</b> trường và nút để đổi vị trí. Nút trong Discord chỉ người gõ lệnh bấm được nếu bật "chỉ chủ menu".</p></div>
+  <div class="pnl sticky" id="ins">${inspector()}</div></div>`;
+}
+
+function canvas(){
+  const m=T.menus[MI];if(!m)return '<div class="mu">Chưa có menu — bấm “＋ Mới”.</div>';
+  const e=m.embed,k=SEL.k,on=x=>k==x?' on':'';
+  const col=e.color||'#8b5cf6';
+  let h=`<div class="dc"><div class="dch"><span class="av">🤖</span><b>Bot Máy Ảo GameViewer</b><i class="bt">BOT</i></div>`;
+  h+=`<div class="el${on('msg')}" onclick="pick('msg',event)">${m.content?md(fillv(m.content)):'<span class="ph">＋ nội dung tin nhắn (nếu có)</span>'}</div>`;
+  if(e.enabled!==false){
+    h+=`<div class="emb${on('embed')}" style="border-left-color:${esc(col)}" onclick="pick('embed',event)">`;
+    const th=fillv(e.thumbnail);
+    h+=`<div class="th el${on('thumb')}" onclick="pick('thumb',event)">${/^https?:/.test(th)?`<img src="${esc(th)}">`:'ảnh nhỏ'}</div>`;
+    h+=`<div style="margin-right:${74}px"><div class="el au${on('author')}" onclick="pick('author',event)">${e.author?.name?md(fillv(e.author.name)):'<span class="ph">＋ tác giả (author)</span>'}</div>`;
+    h+=`<div class="el tt${on('title')}" onclick="pick('title',event)">${e.title?md(fillv(e.title)):'<span class="ph">＋ tiêu đề</span>'}</div><div class="el ds_${on('desc')}" onclick="pick('desc',event)">${e.description?md(fillv(e.description)):'<span class="ph">＋ mô tả</span>'}</div></div>`;
+    h+=`<div class="flds">${(e.fields||[]).map((f,i)=>`<div class="el fld ${f.inline?'in':''}${on('f:'+i)}" draggable="true" ondragstart="DR={k:'f',i:${i}}" ondragover="event.preventDefault();this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="dropField(${i},event)" onclick="pick('f:${i}',event)"><b>${md(fillv(f.name))}</b><div>${md(fillv(f.value))}</div></div>`).join('')}</div>`;
+    const im=fillv(e.image);
+    h+=`<div class="el${on('image')}" onclick="pick('image',event)">${/^https?:/.test(im)?`<img src="${esc(im)}">`:'<div class="ph" style="margin-top:8px">＋ ảnh lớn (image)</div>'}</div>`;
+    h+=`<div class="el fo${on('footer')}" onclick="pick('footer',event)">${e.footer?.text?md(fillv(e.footer.text)):'<span class="ph">＋ chân trang (footer)</span>'}</div></div>`;
+  }
+  (m.rows||[]).forEach((row,r)=>{
+    h+=`<div class="rowb" ondragover="event.preventDefault();this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="dropBtn(${r},null,event)">${row.map((b,c)=>`<span class="dbtn el${on('b:'+r+':'+c)}" style="background:${BST[b.style]||BST.secondary}" draggable="true" ondragstart="DR={k:'b',r:${r},c:${c}}" ondragover="event.preventDefault();event.stopPropagation()" ondrop="dropBtn(${r},${c},event)" onclick="pick('b:${r}:${c}',event)">${esc(b.emoji||'')} ${esc(fillv(b.label))}${b.style=='link'||b.action.type=='link'?' ↗':''}</span>`).join('')}${row.length<5?`<span class="addb" onclick="addBtn(${r})">＋</span>`:''}</div>`;
+  });
+  if((m.rows||[]).length<5)h+=`<div class="newrow" ondragover="event.preventDefault()" ondrop="dropBtn(-1,null,event)" onclick="addRow()">＋ hàng nút mới (thả nút vào đây)</div>`;
+  return h+'</div>';
+}
+
+function pick(k,ev){if(ev)ev.stopPropagation();SEL={k};$('cv').innerHTML=canvas();$('ins').innerHTML=inspector()}
+function ptxt(){return `<div class="mu" style="margin-top:8px">Biến RDP có sẵn (bấm để chèn)</div><div class="chips">${VARL().map(v=>`<span class="chip" onmousedown="event.preventDefault()" onclick="insVar('${v}')">{${v}}</span>`).join('')}</div>`}
+document.addEventListener('focusin',e=>{if(e.target.closest&&e.target.closest('#ins')&&/INPUT|TEXTAREA/.test(e.target.tagName)&&e.target.type!='color')LF=e.target});
+function insVar(v){const e=LF;if(!e||!document.body.contains(e))return toast('Bấm vào ô văn bản trước');const a=e.selectionStart??e.value.length,b=e.selectionEnd??a;e.value=e.value.slice(0,a)+'{'+v+'}'+e.value.slice(b);e.selectionStart=e.selectionEnd=a+v.length+2;e.dispatchEvent(new Event('input'));e.focus()}
+
+function inspector(){
+  const m=T.menus[MI];if(!m)return '';
+  const b=`menus.${MI}.`,e=b+'embed.',k=SEL.k;let h='';
+  const head=t=>`<div class="r" style="margin-bottom:8px"><b>${t}</b></div>`;
+  if(k=='msg')h=head('💬 Tin nhắn')+lab('Nội dung (nằm trên embed)','')+ta(b+'content')+lab('Tên menu','')+inp(b+'name')+`<div class="mu">id: <code>${esc(m.id)}</code></div>`+chk(b+'ownerOnly','Chỉ chủ menu (người gõ lệnh) bấm được nút')+ptxt();
+  else if(k=='embed'){h=head('🧱 Embed')+chk(e+'enabled','Hiện embed',1)+lab('Màu viền','')+`<div>${SW.map(c=>`<span class="sw ${m.embed.color==c?'on':''}" style="background:${c}" onclick="S('${e}color','${c}');pick('embed')"></span>`).join('')}</div><div class="r" style="margin-top:6px">${inp(e+'color',{t:'color'})}</div>`+lab('Link khi bấm tiêu đề','')+inp(e+'url')+chk(e+'timestamp','Hiện thời gian')}
+  else if(k=='title')h=head('🔤 Tiêu đề')+ta(e+'title')+ptxt();
+  else if(k=='desc')h=head('📝 Mô tả')+ta(e+'description',{c:'code'})+`<div class="mu">Hỗ trợ **đậm**, *nghiêng*, __gạch chân__, \`code\`, xuống dòng.</div>`+ptxt();
+  else if(k=='footer')h=head('🔻 Chân trang')+ta(e+'footer.text')+lab('Icon (URL)','')+inp(e+'footer.icon')+ptxt();
+  else if(k=='author')h=head('👤 Tác giả')+ta(e+'author.name')+lab('Icon (URL)','')+inp(e+'author.icon')+ptxt();
+  else if(k=='thumb')h=head('🖼 Ảnh nhỏ')+lab('URL ảnh (https://… hoặc {biến})','')+inp(e+'thumbnail');
+  else if(k=='image')h=head('🖼 Ảnh lớn')+lab('URL ảnh (https://…)','')+inp(e+'image');
+  else if(k.startsWith('f:')){const i=+k.slice(2),f=b+`embed.fields.${i}.`;h=head('▤ Trường #'+(i+1))+lab('Tên','')+inp(f+'name')+lab('Giá trị','')+ta(f+'value')+chk(f+'inline','Xếp ngang (inline)')+`<p class="r"><button class="s sm" onclick="mv(T.menus[MI].embed.fields,${i},-1);SEL={k:'f:${Math.max(0,i-1)}'};draw()">↑</button><button class="s sm" onclick="mv(T.menus[MI].embed.fields,${i},1);SEL={k:'f:${i+1}'};draw()">↓</button><button class="d sm" onclick="T.menus[MI].embed.fields.splice(${i},1);SEL={k:'embed'};dirty(true);draw()">🗑 Xóa</button></p>`+ptxt()}
+  else if(k.startsWith('b:')){const [,r,c]=k.split(':'),p=b+`rows.${r}.${c}.`,bt=m.rows[r]?.[c];if(!bt)return head('(trống)');
+    const actTypes=[['panel','Mở bảng ẩn (Ephemeral)'],['vm','Hành động máy ảo (Start/Stop/Restart)'],['set_dur','Đặt thời lượng máy'],['set_pin','Đặt mã PIN'],['toggle_pin','Bật/Tắt ẩn PIN'],['nav','Chuyển máy trước/sau'],['cmd','Gọi lệnh bot'],['menu','Chuyển sang menu khác'],['refresh','Làm mới Dashboard'],['link','Mở đường dẫn URL']];
+    h=head('🔘 Nút Bấm Discord')+lab('Nhãn nút','')+inp(p+'label')+lab('Emoji (🎮, 🔑, hoặc <:tên:id>)','')+inp(p+'emoji')+lab('Kiểu nút (màu sắc)','')+`<div>${Object.keys(BST).map(s=>`<span class="pill ${bt.style==s?'on':''}" style="background:${BST[s]}" onclick="S('${p}style','${s}');pick('${k}')">${({primary:'Chính',secondary:'Phụ',success:'Xanh',danger:'Đỏ',link:'Link'})[s]}</span>`).join('')}</div>`
+    +lab('Hành động khi bấm','')+`<select onchange="S('${p}action.type',this.value);S('${p}action.value','');pick('${k}')">${actTypes.map(([v,t])=>`<option value="${v}" ${bt.action.type==v?'selected':''}>${t}</option>`).join('')}</select>`
+    +lab('Giá trị hành động (value)','')+inp(p+'action.value',{ph:'mgr, start, 5h, Aistv2026, ...'})
+    +`<p class="r"><button class="d sm" onclick="T.menus[MI].rows[${r}].splice(${c},1);T.menus[MI].rows=T.menus[MI].rows.filter(x=>x.length);SEL={k:'embed'};dirty(true);draw()">🗑 Xóa nút</button></p>`+ptxt()}
+  return h;
+}
+
+// Kéo thả trường và nút
+function dropField(i,ev){ev.preventDefault();ev.stopPropagation();if(!DR||DR.k!='f')return;const a=T.menus[MI].embed.fields,x=a.splice(DR.i,1)[0];a.splice(i,0,x);DR=null;SEL={k:'f:'+i};dirty(true);draw()}
+function dropBtn(r,c,ev){ev.preventDefault();ev.stopPropagation();if(!DR||DR.k!='b')return;const rows=T.menus[MI].rows,sr=DR.r,sc=DR.c;DR=null;
+  if(r===-1){if(rows.length>=5)return;rows.push([rows[sr].splice(sc,1)[0]])}
+  else{if(r!==sr&&rows[r].length>=5)return;const b=rows[sr].splice(sc,1)[0];let idx=c==null?rows[r].length:c;if(r===sr&&c!=null&&c>sc)idx=c-1;rows[r].splice(idx,0,b)}
+  T.menus[MI].rows=rows.filter(x=>x.length);SEL={k:'embed'};dirty(true);draw()}
+const newBtn=()=>({label:'Nút mới',emoji:'✨',style:'primary',action:{type:'panel',value:'mgr'}});
+function addField(){const f=T.menus[MI].embed.fields;if(f.length>=25)return;f.push({name:'Tên trường',value:'{onlineCount}',inline:true});SEL={k:'f:'+(f.length-1)};dirty(true);draw()}
+function addRow(){const m=T.menus[MI];if(m.rows.length>=5)return;m.rows.push([newBtn()]);SEL={k:`b:${m.rows.length-1}:0`};dirty(true);draw()}
+function addBtn(r){const m=T.menus[MI];if(r<0){if(!m.rows.length)return addRow();r=m.rows.findIndex(x=>x.length<5);if(r<0)return addRow()}if(m.rows[r].length>=5)return;m.rows[r].push(newBtn());SEL={k:`b:${r}:${m.rows[r].length-1}`};dirty(true);draw()}
+function newMenu(){const n=prompt('Tên menu mới:','Menu mới');if(!n)return;T.menus.push({id:nid('menu'),name:n,ownerOnly:true,content:'',rows:[],embed:{enabled:true,color:'#8b5cf6',title:'☯️ '+n,description:'Nội dung menu **{machineList}**',fields:[],footer:{text:'',icon:''},thumbnail:'',image:'',author:{name:'',icon:''},url:'',timestamp:false}});MI=T.menus.length-1;SEL={k:'embed'};dirty(true);draw()}
+function dupMenu(){const c=JSON.parse(JSON.stringify(T.menus[MI]));c.id=nid('menu');c.name+=' (bản sao)';T.menus.push(c);MI=T.menus.length-1;dirty(true);draw()}
+async function sendMenu(){const m=T.menus[MI];if(!SENDCH)return toast('Chọn kênh trước');await save();try{await api('POST','/api/rdp/send-menu?pass='+encodeURIComponent(pw),{menuId:m.id,channelId:SENDCH});toast('📤 Đã gửi menu vào kênh Discord!')}catch(e){toast('❌ '+e.message,4000)}}
+
+// ================= TAB 4: QUÉT & TÁI TẠO YML =================
+let scanList=[];
+function tScan(){
+  return `<div class="hint">Quét toàn bộ tệp <code>.github/workflows/*.yml</code> trên Repo Treo Máy (<code>${esc(T.config?.runnerRepo||'')}</code>). Hệ thống sẽ trích xuất tên máy, thời lượng, mã PIN và cho phép bạn nâng cấp hàng loạt sang bản <code>taomay.yml</code> mới nhất (GameViewer 4.43.1 + StarDesk 1.5.3 + DPAPI session + dọn dẹp SID).</div>
+  <p class="r"><button onclick="doScan()">🔍 Quét Ngay Kho Treo Máy</button><button class="g" onclick="doRebuild('all')">🚀 Nâng Cấp Toàn Bộ Theo Bản Mới Nhất</button><span id="sc_msg" class="mu"></span></p>
+  <table class="t"><thead><tr><th>Tệp Workflow</th><th>Tên Máy</th><th>Thời Lượng</th><th>Mã PIN</th><th>Phiên Bản Template</th><th>Lần Chạy Gần Nhất</th><th>Thao Tác</th></tr></thead>
+  <tbody>${scanList.length?scanList.map(w=>`
+    <tr>
+      <td><code>${esc(w.file)}</code></td>
+      <td><b>${esc(w.displayName)}</b> (${esc(w.machineId)})</td>
+      <td>${esc(w.duration)}</td>
+      <td><code>${esc(w.pin)}</code></td>
+      <td>${w.isLatestTemplate?'<span class="badge on">✅ Mới nhất</span>':'<span class="badge wait">⚠️ Cần nâng cấp</span>'}</td>
+      <td>${w.lastRun?`<a href="${esc(w.lastRun.runUrl)}" target="_blank" style="color:#38bdf8">${w.lastRun.status} (${w.lastRun.conclusion||'running'})</a>`:'<span class="mu">Chưa chạy</span>'}</td>
+      <td><button class="s sm" onclick="doRebuild('${w.machineId}')">🛠️ Nâng cấp</button> <button class="g sm" onclick="vmControl('${w.machineId}','start')">▶️ Chạy</button></td>
+    </tr>`).join(''):'<tr><td colspan="7" style="text-align:center;color:var(--mu)">Bấm "Quét Ngay" để quét các file trên Runner Repo.</td></tr>'}
+  </tbody></table>`;
+}
+
+async function doScan(){
+  $('sc_msg').textContent='⏳ Đang quét .github/workflows...';
+  try{
+    const r=await api('GET','/api/rdp/scan-workflows?pass='+encodeURIComponent(pw));
+    scanList=r.workflows||[];
+    $('sc_msg').textContent=`✅ Đã quét ${scanList.length} máy trên ${r.runnerRepo}`;
+    draw();
+  }catch(e){$('sc_msg').textContent='❌ '+e.message}
+}
+
+async function doRebuild(mName){
+  if(!confirm(mName==='all'?'Nâng cấp TOÀN BỘ workflow trên Runner Repo sang bản taomay.yml mới nhất?':'Nâng cấp máy '+mName+'?'))return;
+  toast('⏳ Đang tái tạo và commit sang Runner Repo...');
+  try{
+    const r=await api('POST','/api/rdp/rebuild-workflows?pass='+encodeURIComponent(pw),{machine:mName});
+    toast('✔ Đã nâng cấp thành công '+r.count+' workflow!');
+    await doScan();
+  }catch(e){toast('❌ '+e.message,4000)}
+}
+
+// ================= TAB 5: TẠO MÁY MỚI =================
+function tCreate(){
+  return `<div class="card" style="max-width:700px;margin:auto">
+    <h3 style="margin:0 0 10px 0;color:#c4b5fd">➕ Khởi Tạo Máy Ảo Mới Trên Runner Repo</h3>
+    <div class="g2">
+      <div>${lab('Tên máy (slug)','')}<input id="cr_name" value="may-${Date.now().toString(36).slice(-4)}"></div>
+      <div>${lab('Tên hiển thị','')}<input id="cr_disp" placeholder="VD: Máy Game 1"></div>
+      <div class="wide">${lab('Thời lượng','')}<div class="r">${[['1h','1 Giờ'],['3h','3 Giờ'],['5h00m','5 Giờ']].map(([v,l])=>`<button class="s sm" onclick="$('cr_dur').value='${v}';this.parentElement.querySelectorAll('button').forEach(b=>b.className='s sm');this.className='sm'">${l}</button>`).join('')}</div><input id="cr_dur" value="5h00m" style="margin-top:6px"></div>
+      <div class="wide">${lab('Mã PIN GameViewer (8-16 ký tự chữ & số)','')}<div class="r">${['Aistv2026','Admin8888','Game2026','ProGamer1'].map(p=>`<button class="s sm" onclick="$('cr_pin').value='${p}'">${p}</button>`).join('')}<button class="s sm" onclick="$('cr_pin').value='Aistv'+Math.floor(1000+Math.random()*9000)">🎲 Ngẫu nhiên</button></div><input id="cr_pin" value="Aistv2026" style="margin-top:6px"></div>
+      <div>${lab('Nơi Treo (Runner Repo)','')}<input id="cr_run" value="${esc(T.config?.runnerRepo||'ohohhoho82-alt/app')}"></div>
+      <div>${lab('Kho Lưu Ổ (Storage Repo)','')}<input id="cr_sto" value="${esc(T.config?.storageRepo||'ddvdat-glitch/rdp')}"></div>
+      <div class="wide">${lab('Discord User ID Chủ Sở Hữu (tùy chọn)','')}<input id="cr_own" placeholder="946662197168341053"></div>
     </div>
+    <p style="margin-top:16px"><button onclick="submitCreateVm()" style="padding:10px 20px;font-size:15px">🚀 Tạo Máy & Khởi Chạy Ngay</button> <span id="cr_st" class="mu"></span></p>
+  </div>`;
+}
 
-    <!-- TAB 4: CẤU HÌNH 2-REPO & GIT -->
-    <div id="pnl_config" style="display:none">
-      <div class="card">
-        <h2 style="margin:0 0 12px 0;font-size:16px;color:#c4b5fd">⚙️ Cấu Hình Hệ Thống 2-Repo & GitHub PAT Token</h2>
-        <div class="g2">
-          <div>
-            <label>Storage Repo (Kho Lưu Ổ Đĩa Gốc)</label>
-            <input id="cfg_storage" placeholder="VD: ddvdat-glitch/rdp">
-          </div>
-          <div>
-            <label>Runner Repo (Kho Treo Actions)</label>
-            <input id="cfg_runner" placeholder="VD: ohohhoho82-alt/app">
-          </div>
-          <div>
-            <label>GitHub Personal Access Token (PAT)</label>
-            <input id="cfg_token" type="password" placeholder="ghp_... hoặc github_pat_...">
-          </div>
-          <div>
-            <label>Root Admin Discord ID</label>
-            <input id="cfg_admin" placeholder="946662197168341053">
-          </div>
-        </div>
-        <p style="margin-top:14px">
-          <button onclick="saveSysConfig()">💾 Lưu Cấu Hình Hệ Thống</button>
-          <span id="cfg_msg" class="mu" style="margin-left:10px"></span>
-        </p>
-      </div>
+async function submitCreateVm(){
+  const name=$('cr_name').value.trim();
+  const displayName=$('cr_disp').value.trim()||('Máy '+name);
+  const duration=$('cr_dur').value.trim();
+  const pin=$('cr_pin').value.trim();
+  const runnerRepo=$('cr_run').value.trim();
+  const storageRepo=$('cr_sto').value.trim();
+  const ownerId=$('cr_own').value.trim();
+  if(!name)return alert('Vui lòng nhập tên định danh!');
+  if(!pin||pin.length<8)return alert('Mã PIN tối thiểu 8 ký tự!');
 
-      <div class="card">
-        <h2 style="margin:0 0 12px 0;font-size:16px;color:#c4b5fd">📦 Danh Sách Nhiều Tài Khoản GitHub Treo Máy</h2>
-        <div class="g2" style="margin-bottom:10px">
-          <div><input id="acc_alias" placeholder="Alias (VD: acc1)"></div>
-          <div><input id="acc_repo" placeholder="owner/repo"></div>
-          <div><input id="acc_token" type="password" placeholder="PAT Token"></div>
-          <div><button onclick="addGitAcc()">➕ Thêm Tài Khoản</button></div>
-        </div>
-        <table class="t" id="tbl_accs">
-          <thead><tr><th>Alias</th><th>Repo</th><th>Mặc Định</th><th>Thao Tác</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
+  $('cr_st').textContent='⏳ Đang tạo file workflow và kích hoạt job...';
+  try{
+    const r=await api('POST','/api/rdp/create-vm?pass='+encodeURIComponent(pw),{name,displayName,duration,pin,runnerRepo,storageRepo,ownerId});
+    toast('✔ '+r.message);
+    await init();
+    go('vms');
+  }catch(e){$('cr_st').textContent='❌ '+e.message}
+}
 
-  <!-- MODAL CHỈNH SỬA MÁY ẢO -->
-  <div id="modal_edit" class="modal-bg">
-    <div class="modal-box">
-      <h3 style="margin:0 0 12px 0;color:#c4b5fd">✏️ Chỉnh Sửa Thông Số Máy Ảo</h3>
-      <input type="hidden" id="ed_machine">
-      <div class="g2">
-        <div class="wide">
-          <label>Tên hiển thị</label>
-          <input id="ed_display" style="width:100%">
-        </div>
-        <div>
-          <label>Mã PIN GameViewer</label>
-          <input id="ed_pin" style="width:100%">
-        </div>
-        <div>
-          <label>Thời lượng</label>
-          <input id="ed_dur" style="width:100%">
-        </div>
-        <div class="wide">
-          <label>Discord Owner ID</label>
-          <input id="ed_owner_id" style="width:100%">
-        </div>
-        <div class="wide">
-          <label>Tên Chủ Sở Hữu</label>
-          <input id="ed_owner_name" style="width:100%">
-        </div>
-      </div>
-      <p style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
-        <button class="s" onclick="closeModal()">Đóng</button>
-        <button onclick="saveEditVm()">💾 Lưu Thay Đổi</button>
-      </p>
-    </div>
-  </div>
+// ================= TAB 6: CÀI ĐẶT HỆ THỐNG 2-REPO =================
+function tSet(){
+  const c=T.config||{};
+  return `<div class="card"><h3 style="margin:0 0 10px">Cấu hình Hệ Thống 2-Repo & Token</h3>
+  <div class="g2">
+    <div>${lab('Storage Repo (Kho Lưu Ổ Đĩa Gốc)','')}${inp('config.storageRepo')}</div>
+    <div>${lab('Runner Repo (Nơi Treo Actions)','')}${inp('config.runnerRepo')}</div>
+    <div>${lab('PAT Token (ghp_... hoặc github_pat_...)','')}${inp('config.token')}</div>
+    <div>${lab('Root Admin Discord ID','')}${inp('config.rootAdmin')}</div>
+  </div></div>
+  <div class="card"><h3 style="margin:0 0 8px">Sao lưu / chuyển cấu hình</h3><div class="r"><button class="s" onclick="exportCfg()">⬇ Xuất JSON</button><label class="s" style="margin:0;background:#2a2a3d;padding:6px 13px;border-radius:8px;cursor:pointer;color:#fff;text-transform:none;font-size:14px">⬆ Nhập JSON<input type=file accept=".json" style="display:none" onchange="importCfg(this)"></label><button class="d" onclick="resetCfg()">♻ Khôi phục mặc định (lệnh & menu RDP)</button></div></div>`;
+}
 
-  <div id="toast" class="toast"></div>
+function exportCfg(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(T,null,2)],{type:'application/json'}));a.download='rdp-config.json';a.click()}
+function importCfg(el){const f=el.files[0];if(!f)return;f.text().then(t=>{try{const j=JSON.parse(t);for(const k of ['commands','menus','config','machines'])if(j[k])T[k]=j[k];dirty(true);draw();toast('Đã nhập — bấm Lưu để áp dụng')}catch{toast('File JSON sai')}})}
+async function resetCfg(){if(!confirm('Khôi phục toàn bộ cấu hình Lệnh & Menu RDP về mặc định?'))return;try{await api('PUT','/api/rdp/full?pass='+encodeURIComponent(pw),{});await init();toast('Đã khôi phục mặc định')}catch(e){toast(e.message)}}
 
-  <script>
-    let STATE = { machines: {}, accounts: {}, config: {} };
-    let maskPin = true;
-
-    const $ = id => document.getElementById(id);
-    const P = () => $('admin_pw').value || sessionStorage.rdp_pw || '';
-
-    function toast(text, ms = 3000) {
-      const el = $('toast');
-      el.textContent = text;
-      el.style.display = 'block';
-      clearTimeout(toast.t);
-      toast.t = setTimeout(() => el.style.display = 'none', ms);
-    }
-
-    async function api(path, method = 'GET', body = null) {
-      const pw = P();
-      const r = await fetch(path + (path.includes('?') ? '&' : '?') + 'pass=' + encodeURIComponent(pw), {
-        method,
-        headers: { 'Content-Type': 'application/json', 'x-admin-password': pw },
-        body: body ? JSON.stringify(body) : undefined
-      });
-      return await r.json();
-    }
-
-    function switchTab(t) {
-      ['vms', 'scan', 'create', 'config'].forEach(k => {
-        $('pnl_' + k).style.display = (k === t) ? 'block' : 'none';
-        $('tb_' + k).className = (k === t) ? 'on' : '';
-      });
-      if (t === 'scan') scanWorkflows();
-    }
-
-    function togglePinMask() {
-      maskPin = !maskPin;
-      $('lbl_pin_toggle').textContent = maskPin ? '👁️ Hiện Mã PIN' : '🙈 Ẩn Mã PIN';
-      renderVms();
-    }
-
-    function setDur(val, el) {
-      $('cr_dur').value = val;
-      $('dur_chips').querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
-      el.classList.add('on');
-    }
-
-    function setPin(val, el) {
-      $('cr_pin').value = val;
-      $('pin_chips').querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
-      if (el) el.classList.add('on');
-    }
-
-    function genRandomPin(el) {
-      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-      let p = 'Aistv';
-      for (let i = 0; i < 4; i++) p += chars[Math.floor(Math.random() * chars.length)];
-      setPin(p, el);
-    }
-
-    function copyToClipboard(txt, btn) {
-      navigator.clipboard.writeText(txt).then(() => {
-        const orig = btn.textContent;
-        btn.textContent = '✔ Đã chép!';
-        setTimeout(() => btn.textContent = orig, 1800);
-      });
-    }
-
-    async function init() {
-      if ($('admin_pw').value) sessionStorage.rdp_pw = $('admin_pw').value;
-      $('sync_status').textContent = 'Đang đồng bộ...';
-      await loadState();
-      $('sync_status').textContent = '✅ Đã kết nối';
-    }
-
-    async function loadState() {
-      try {
-        const res = await api('/api/rdp/state');
-        if (!res.ok) {
-          $('sync_status').textContent = '❌ ' + (res.error || 'Lỗi xác thực');
-          return;
-        }
-        STATE = res.data || {};
-        $('st_runner').textContent = (STATE.config && STATE.config.runnerRepo) || 'ohohhoho82-alt/app';
-        $('st_storage').textContent = (STATE.config && STATE.config.storageRepo) || 'ddvdat-glitch/rdp';
-
-        if (STATE.config) {
-          $('cfg_storage').value = STATE.config.storageRepo || 'ddvdat-glitch/rdp';
-          $('cfg_runner').value = STATE.config.runnerRepo || 'ohohhoho82-alt/app';
-          $('cfg_admin').value = STATE.config.rootAdmin || '946662197168341053';
-          $('cr_runner').value = STATE.config.runnerRepo || 'ohohhoho82-alt/app';
-          $('cr_storage').value = STATE.config.storageRepo || 'ddvdat-glitch/rdp';
-        }
-
-        renderVms();
-        renderAccounts();
-      } catch (err) {
-        $('sync_status').textContent = '❌ ' + err.message;
-      }
-    }
-
-    function renderVms() {
-      const vms = Object.values(STATE.machines || {});
-      const q = ($('vm_search').value || '').trim().toLowerCase();
-      const filtered = vms.filter(m => {
-        if (!q) return true;
-        return (m.name && m.name.toLowerCase().includes(q)) ||
-               (m.displayName && m.displayName.toLowerCase().includes(q)) ||
-               (m.gvId && m.gvId.toLowerCase().includes(q)) ||
-               (m.ownerId && m.ownerId.toLowerCase().includes(q)) ||
-               (m.owner && m.owner.toLowerCase().includes(q));
-      });
-
-      let onCount = 0;
-      let offCount = 0;
-      vms.forEach(m => { if (m.isOnline) onCount++; else offCount++; });
-
-      $('st_online').textContent = onCount;
-      $('st_offline').textContent = offCount;
-      $('st_total').textContent = vms.length;
-      $('cnt_tab_vms').textContent = vms.length;
-
-      const container = $('vms_container');
-      if (filtered.length === 0) {
-        container.innerHTML = '<div class="card wide" style="text-align:center;color:var(--mu);padding:40px">Không tìm thấy máy ảo nào phù hợp.</div>';
-        return;
-      }
-
-      container.innerHTML = filtered.map(m => {
-        const isOnline = m.isOnline;
-        const gvId = m.gvId || (m.info && m.info.gvId) || '';
-        const starId = m.stardeskId || (m.info && m.info.stardeskId) || '';
-        const rawPin = m.gvPin || (m.info && m.info.gvPin) || 'Aistv2026';
-        const displayPin = maskPin ? '••••••••' : rawPin;
-        const statusBadge = isOnline
-          ? '<span class="badge on">🟢 Online</span>'
-          : (m.status === 'queued' ? '<span class="badge wait">🟡 Đang khởi chạy</span>' : '<span class="badge off">🔴 Offline</span>');
-
-        const remStr = m.remainSec != null
-          ? `${Math.floor(m.remainSec / 3600)}h ${Math.floor((m.remainSec % 3600) / 60)}m còn lại`
-          : (m.duration || '5h00m');
-
-        return `
-          <div class="vm-card">
-            <div class="head">
-              <div>
-                <div class="title">${m.displayName || ('Máy ' + m.name)}</div>
-                <div class="slug">${m.name} · Kho: ${m.storageRepo || 'ddvdat-glitch/rdp'}</div>
-              </div>
-              <div>${statusBadge}</div>
-            </div>
-
-            <div class="prop-row">
-              <span class="lbl">🎮 GameViewer ID:</span>
-              <span class="val">
-                ${gvId ? `<code>${gvId}</code><button class="copy-btn" onclick="copyToClipboard('${gvId}', this)">📋 Chép</button>` : '<span class="mu">(Đang kết nối)</span>'}
-              </span>
-            </div>
-
-            <div class="prop-row">
-              <span class="lbl">🔑 GameViewer PIN:</span>
-              <span class="val">
-                <code>${displayPin}</code>
-                <button class="copy-btn" onclick="copyToClipboard('${rawPin}', this)">📋 Chép</button>
-              </span>
-            </div>
-
-            <div class="prop-row">
-              <span class="lbl">⭐ StarDesk ID:</span>
-              <span class="val">${starId ? `<code>${starId}</code>` : '<span class="mu">-</span>'}</span>
-            </div>
-
-            <div class="prop-row">
-              <span class="lbl">👤 User / Pass:</span>
-              <span class="val"><code>runneradmin</code> / <code>Aistv@2026</code></span>
-            </div>
-
-            <div class="prop-row">
-              <span class="lbl">⏰ Thời gian:</span>
-              <span class="val" style="color:#fbbf24">${remStr}</span>
-            </div>
-
-            <div class="prop-row">
-              <span class="lbl">👑 Chủ sở hữu:</span>
-              <span class="val">${m.owner || m.ownerId || '<span class="mu">Chưa gán</span>'}</span>
-            </div>
-
-            <div class="actions-row">
-              <button class="g sm" onclick="controlVm('${m.name}', 'start')">▶️ Chạy</button>
-              <button class="warn sm" onclick="controlVm('${m.name}', 'restart')">🔄 Khởi Động</button>
-              <button class="d sm" onclick="controlVm('${m.name}', 'stop')">🛑 Tắt</button>
-              <button class="s sm" onclick="openEditModal('${m.name}')">✏️ Sửa</button>
-              <button class="s sm" onclick="showPrompt('${m.name}')">📝 Prompt</button>
-              <button class="d sm" onclick="controlVm('${m.name}', 'delete')">🗑️ Xóa</button>
-            </div>
-          </div>
-        `;
-      }).join('');
-    }
-
-    function renderAccounts() {
-      const accs = STATE.accounts || {};
-      const def = STATE.defaultAccount || '';
-      $('tbl_accs').querySelector('tbody').innerHTML = Object.values(accs).map(a => `
-        <tr>
-          <td><b>${a.alias}</b></td>
-          <td>${a.repo}</td>
-          <td>${a.alias === def ? '<span class="badge on">Mặc định</span>' : `<button class="s sm" onclick="setDefaultAcc('${a.alias}')">Chọn</button>`}</td>
-          <td><button class="d sm" onclick="delGitAcc('${a.alias}')">Xóa</button></td>
-        </tr>
-      `).join('');
-    }
-
-    async function controlVm(machine, action) {
-      if (action === 'delete' && !confirm(`Bạn có chắc chắn muốn xóa máy [${machine}]?`)) return;
-      toast(`Đang gửi lệnh ${action} cho máy ${machine}...`);
-      const res = await api('/api/rdp/control-vm', 'POST', { machine, action });
-      if (res.ok) {
-        toast(`✔ ${res.message}`);
-        await loadState();
-      } else {
-        toast(`❌ Lỗi: ${res.error}`, 5000);
-      }
-    }
-
-    async function showPrompt(mName) {
-      const res = await api('/api/rdp/prompt?machine=' + encodeURIComponent(mName));
-      if (res.ok && res.prompt) {
-        alert(`Prompt Duy Trì Phiên Máy [${mName}]:\n\n${res.prompt}`);
-      } else {
-        alert('Chưa có thông tin prompt cho máy ' + mName);
-      }
-    }
-
-    async function scanWorkflows() {
-      $('scan_msg').textContent = '⏳ Đang quét .github/workflows trên Runner Repo...';
-      const res = await api('/api/rdp/scan-workflows');
-      if (!res.ok) {
-        $('scan_msg').textContent = '❌ Lỗi: ' + res.error;
-        return;
-      }
-      $('scan_msg').textContent = `✅ Đã quét ${res.workflows.length} máy trên ${res.runnerRepo}`;
-      $('cnt_tab_scan').textContent = res.workflows.length;
-
-      const tb = $('tbl_scan').querySelector('tbody');
-      if (res.workflows.length === 0) {
-        tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--mu)">Không có file workflow máy ảo nào.</td></tr>';
-        return;
-      }
-
-      tb.innerHTML = res.workflows.map(w => {
-        const verTag = w.isLatestTemplate
-          ? '<span class="badge on">✅ Bản mới nhất</span>'
-          : '<span class="badge wait">⚠️ Cần nâng cấp</span>';
-
-        const runStat = w.lastRun
-          ? `<a href="${w.lastRun.runUrl || '#'}" target="_blank" style="color:#38bdf8">${w.lastRun.status} (${w.lastRun.conclusion || 'running'})</a>`
-          : '<span class="mu">Chưa chạy</span>';
-
-        return `
-          <tr>
-            <td><code>${w.file}</code></td>
-            <td><b>${w.displayName}</b> (${w.machineId})</td>
-            <td>${w.duration}</td>
-            <td><code>${w.pin}</code></td>
-            <td>${verTag}</td>
-            <td>${runStat}</td>
-            <td>
-              <button class="s sm" onclick="rebuildWorkflows('${w.machineId}')">🛠️ Nâng cấp</button>
-              <button class="g sm" onclick="controlVm('${w.machineId}', 'start')">▶️ Chạy</button>
-            </td>
-          </tr>
-        `;
-      }).join('');
-      await loadState();
-    }
-
-    async function rebuildWorkflows(machine = 'all') {
-      const isAll = (machine === 'all');
-      if (!confirm(isAll ? 'Bạn có muốn nâng cấp toàn bộ workflow trên Runner Repo sang bản taomay.yml mới nhất?' : `Nâng cấp workflow cho máy ${machine}?`)) return;
-      toast('⏳ Đang tái tạo và đẩy commit sang Runner Repo...');
-      const res = await api('/api/rdp/rebuild-workflows', 'POST', { machine });
-      if (res.ok) {
-        toast(`✔ Đã nâng cấp thành công ${res.count} workflow!`);
-        await scanWorkflows();
-      } else {
-        toast(`❌ Lỗi: ${res.error}`, 5000);
-      }
-    }
-
-    async function createVmSubmit() {
-      const name = ($('cr_name').value || '').trim();
-      const displayName = ($('cr_display').value || ('Máy ' + name)).trim();
-      const duration = $('cr_dur').value;
-      const pin = $('cr_pin').value.trim();
-      const runnerRepo = $('cr_runner').value.trim();
-      const storageRepo = $('cr_storage').value.trim();
-      const ownerId = $('cr_owner').value.trim();
-
-      if (!name) return alert('Vui lòng nhập tên định danh cho máy!');
-      if (!pin || pin.length < 8) return alert('Mã PIN phải từ 8 đến 16 ký tự chữ và số!');
-
-      $('cr_msg').textContent = '⏳ Đang tạo file workflow và kích hoạt phiên chạy...';
-      const res = await api('/api/rdp/create-vm', 'POST', {
-        name, displayName, duration, pin, runnerRepo, storageRepo, ownerId
-      });
-
-      if (res.ok) {
-        $('cr_msg').textContent = '✅ ' + res.message;
-        toast('✔ ' + res.message);
-        switchTab('vms');
-        await loadState();
-      } else {
-        $('cr_msg').textContent = '❌ Lỗi: ' + res.error;
-      }
-    }
-
-    function openEditModal(mName) {
-      const m = (STATE.machines || {})[mName];
-      if (!m) return;
-      $('ed_machine').value = m.name;
-      $('ed_display').value = m.displayName || ('Máy ' + m.name);
-      $('ed_pin').value = m.gvPin || 'Aistv2026';
-      $('ed_dur').value = m.duration || '5h00m';
-      $('ed_owner_id').value = m.ownerId || '';
-      $('ed_owner_name').value = m.owner || '';
-      $('modal_edit').style.display = 'grid';
-    }
-
-    function closeModal() {
-      $('modal_edit').style.display = 'none';
-    }
-
-    async function saveEditVm() {
-      const machine = $('ed_machine').value;
-      const displayName = $('ed_display').value;
-      const gvPin = $('ed_pin').value;
-      const duration = $('ed_dur').value;
-      const ownerId = $('ed_owner_id').value;
-      const ownerName = $('ed_owner_name').value;
-
-      const res = await api('/api/rdp/edit-vm', 'POST', {
-        machine, displayName, gvPin, duration, ownerId, ownerName
-      });
-      if (res.ok) {
-        toast('✔ Đã lưu thay đổi cho máy ' + machine);
-        closeModal();
-        await loadState();
-      } else {
-        toast('❌ Lỗi: ' + res.error);
-      }
-    }
-
-    async function saveSysConfig() {
-      const storageRepo = $('cfg_storage').value.trim();
-      const runnerRepo = $('cfg_runner').value.trim();
-      const token = $('cfg_token').value.trim();
-      const rootAdmin = $('cfg_admin').value.trim();
-
-      $('cfg_msg').textContent = '⏳ Đang lưu...';
-      const res = await api('/api/rdp/save-system-config', 'POST', {
-        storageRepo, runnerRepo, token, rootAdmin
-      });
-      if (res.ok) {
-        $('cfg_msg').textContent = '✅ Đã lưu cấu hình!';
-        toast('✔ Đã lưu cấu hình hệ thống');
-        await loadState();
-      } else {
-        $('cfg_msg').textContent = '❌ Lỗi: ' + res.error;
-      }
-    }
-
-    async function addGitAcc() {
-      const alias = $('acc_alias').value.trim();
-      const repo = $('acc_repo').value.trim();
-      const token = $('acc_token').value.trim();
-      if (!alias || !repo || !token) return alert('Thiếu thông tin tài khoản!');
-      await api('/api/rdp/config', 'POST', { action: 'add_account', alias, repo, token });
-      await loadState();
-    }
-
-    async function delGitAcc(alias) {
-      if (!confirm('Xóa tài khoản ' + alias + '?')) return;
-      await api('/api/rdp/config', 'POST', { action: 'del_account', alias });
-      await loadState();
-    }
-
-    async function setDefaultAcc(alias) {
-      await api('/api/rdp/config', 'POST', { action: 'set_default_account', alias });
-      await loadState();
-    }
-
-    // Tự động khởi tạo khi mở trang
-    window.onload = () => {
-      $('cr_name').value = 'may-' + Date.now().toString(36).slice(-4);
-      if (sessionStorage.rdp_pw) $('admin_pw').value = sessionStorage.rdp_pw;
-      init();
-    };
-  </script>
-</body>
-</html>
+init();
+</script></body></html>
