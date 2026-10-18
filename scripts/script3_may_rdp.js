@@ -1,28 +1,54 @@
 // ============================================================================
-// BOT QUẢN LÝ MÁY ẢO RDP & STARDESK (KIẾN TRÚC 2 REPO: GỐC LƯU TRỮ - RUNNER TREO MÁY)
+// BOT QUẢN LÝ MÁY ẢO STARDESK (BẢO MẬT PHÂN QUYỀN & KIẾN TRÚC 2 REPO)
 // Trigger  : ^!may\b
 // Kiểu     : regex | Kiểu trả: send
 // ============================================================================
 // 1. Repo Gốc (ddvdat-glitch/rdp): Lưu toàn bộ Release 7z & Nhánh State của máy gốc và máy con.
 // 2. Repo Runner (ohohhoho82-alt/app): Chỉ treo máy (chạy GitHub Actions runner).
 // 3. Kết nối từ xa: StarDesk 1.5.3 (lấy từ X:\Apps\StarDesk-1.5.3.exe cài ra C:\).
+// 4. Phân quyền: Cấp quyền bởi Root Admin ID: 946662197168341053.
 // ============================================================================
 
 const https = require('https');
 const path = require('path');
 const fs = require('fs');
 
-// ----------------- CẤU HÌNH HỆ THỐNG -----------------
+// ----------------- CẤU HÌNH & BẢO MẬT PHÂN QUYỀN -----------------
+const ROOT_ADMIN = '946662197168341053';
+
+// Lưu trữ trạng thái bền vững trong store (tự động đồng bộ vào data.json)
+store.allowedUsers = store.allowedUsers || {};
+store.allowedUsers[ROOT_ADMIN] = { id: ROOT_ADMIN, name: 'Root Admin', at: 0 };
+store.machines = store.machines || {};
+
 const R = shared.rdp = shared.rdp || {};
-R.machines = R.machines || {};
-R.config = R.config || {};
+R.machines = store.machines;
+R.config = R.config || store.config || {};
 
 const STORAGE_REPO = R.config.storageRepo || process.env.STORAGE_REPO || 'ddvdat-glitch/rdp';
 const RUNNER_REPO = R.config.runnerRepo || process.env.RUNNER_REPO || 'ohohhoho82-alt/app';
 const GH_TOKEN = R.config.token || process.env.PAT_TOKEN || process.env.RDP_GH_TOKEN || process.env.STORAGE_GH_TOKEN || process.env.GH_TOKEN || '';
 
 const ev = ctx.event || 'message';
-const isStaff = !!(ctx.user && (ctx.user.isAdmin || ctx.user.isOwner));
+const userId = String((ctx.user && ctx.user.id) || '');
+const userDisplay = (ctx.user && (ctx.user.display || ctx.user.username)) || 'Người dùng';
+
+// ----------------- HÀM KIỂM TRA QUYỀN -----------------
+function isRootUser(uid) {
+  return uid === ROOT_ADMIN;
+}
+
+function isAllowedUser(uid) {
+  if (!uid) return false;
+  if (uid === ROOT_ADMIN) return true;
+  return !!(store.allowedUsers && store.allowedUsers[uid]);
+}
+
+function canManageMachine(m, uid) {
+  if (!m) return false;
+  if (isRootUser(uid)) return true;
+  return m.ownerId === uid;
+}
 
 // ----------------- TIỆN ÍCH -----------------
 const pad = n => String(n).padStart(2, '0');
@@ -39,8 +65,11 @@ const parseDur = s => {
   return { input: '5h00m', min: 300 };
 };
 const say = (text, opts) => {
-  if (opts && opts.buttons) ui.send({ content: text, buttons: opts.buttons });
-  else reply(text);
+  if (typeof ui !== 'undefined' && ui.send && opts && opts.buttons) {
+    ui.send({ content: text, buttons: opts.buttons });
+  } else {
+    reply(text);
+  }
 };
 
 // ----------------- GỌI GITHUB REST API -----------------
@@ -98,11 +127,15 @@ function gh(method, repo, endpoint, body, customToken) {
 
 // ----------------- ĐỌC FILE MẪU TAOMAY.YML -----------------
 async function loadTemplate() {
+  // 1. Thử đọc từ local candidates
   const localCandidates = [
     'c:/Users/acc/Downloads/badao/taomay.yml',
     'c:/Users/acc/Downloads/badao/taomay.yaml',
+    path.resolve(process.cwd(), '.github/workflows/taomay.yml'),
+    path.resolve(process.cwd(), '.github/workflows/taomay.yaml'),
     path.resolve(process.cwd(), 'taomay.yml'),
     path.resolve(process.cwd(), 'taomay.yaml'),
+    path.resolve(__dirname, '.github/workflows/taomay.yml'),
     path.resolve(__dirname, 'taomay.yml'),
     path.resolve(__dirname, 'taomay.yaml'),
     path.resolve(__dirname, '../../taomay.yml'),
@@ -114,15 +147,19 @@ async function loadTemplate() {
     } catch {}
   }
 
-  // Tải từ Repo Gốc
-  try {
-    const f = await gh('GET', STORAGE_REPO, '/contents/taomay.yml');
-    if (f && f.content) return Buffer.from(f.content.replace(/\s+/g, ''), 'base64').toString('utf8');
-  } catch {}
-  try {
-    const f = await gh('GET', STORAGE_REPO, '/contents/taomay.yaml');
-    if (f && f.content) return Buffer.from(f.content.replace(/\s+/g, ''), 'base64').toString('utf8');
-  } catch {}
+  // 2. Thử tải từ Repo Gốc (.github/workflows/taomay.yml, taomay.yml...)
+  const remoteCandidates = [
+    '.github/workflows/taomay.yml',
+    '.github/workflows/taomay.yaml',
+    'taomay.yml',
+    'taomay.yaml'
+  ];
+  for (const rc of remoteCandidates) {
+    try {
+      const f = await gh('GET', STORAGE_REPO, `/contents/${rc}`);
+      if (f && f.content) return Buffer.from(f.content.replace(/\s+/g, ''), 'base64').toString('utf8');
+    } catch {}
+  }
 
   throw new Error(`Không thấy file mẫu taomay.yml trên máy hoặc Repo Gốc (${STORAGE_REPO})`);
 }
@@ -135,6 +172,23 @@ function prepareWorkflow(tpl, name, duration) {
   out = out.replace(/(display_name:[\s\S]*?default:\s*)['"][^'"]*['"]/i, `$1'Máy ${name}'`);
   out = out.replace(/(storage_repo:[\s\S]*?default:\s*)['"][^'"]*['"]/i, `$1'${STORAGE_REPO}'`);
   out = out.replace(/(duration:[\s\S]*?default:\s*)['"][^'"]*['"]/i, `$1'${duration}'`);
+
+  // Bật cancel-in-progress để khi kích hoạt phiên mới sẽ tự động hủy phiên cũ và lưu ổ đĩa
+  out = out.replace(/cancel-in-progress:\s*false/gi, 'cancel-in-progress: true');
+
+  // BỎ HOÀN TOÀN MỞ RDP ĐỂ TRÁNH GITHUB BAN
+  out = out.replace(/fDenyTSConnections['"]\s*-Value\s*0/g, `fDenyTSConnections' -Value 1`);
+  out = out.replace(/Start-Service\s*-Name\s*TermService[^\r\n]*/g, `Stop-Service -Name TermService -Force -ErrorAction SilentlyContinue; Set-Service -Name TermService -StartupType Disabled -ErrorAction SilentlyContinue`);
+  out = out.replace(/LocalPort\s*3389[^\r\n]*/g, `LocalPort 8080 -Profile Any | Out-Null`);
+
+  // SỬA TREO VB-AUDIO: Thay thế Start-Process -Wait bằng Start-Job có Timeout 15s
+  if (out.includes('VBCABLE_Setup_x64.exe') && !out.includes('Wait-Job -Job ($vbJob)')) {
+    out = out.replace(
+      /Start-Process\s*-FilePath\s*["']\$vbCacheDir\\VBCABLE_Setup_x64\.exe["'][^;\r\n]*-Wait;?/g,
+      `$vbJob = Start-Job -ScriptBlock { param($dir) Start-Process -FilePath "$dir\\VBCABLE_Setup_x64.exe" -ArgumentList '-i', '-h' -WorkingDirectory "$dir" -Wait; } -ArgumentList "$vbCacheDir"; $null = Wait-Job -Job $vbJob -Timeout 15; Stop-Job -Job $vbJob -ErrorAction SilentlyContinue; Remove-Job -Job $vbJob -Force -ErrorAction SilentlyContinue;`
+    );
+  }
+
   return out;
 }
 
@@ -159,20 +213,30 @@ async function pushWorkflow(name, content) {
 }
 
 async function triggerRun(name, duration) {
-  await gh('POST', RUNNER_REPO, `/actions/workflows/${name}.yml/dispatches`, {
-    ref: 'main',
-    inputs: {
-      machine_id: name,
-      display_name: `Máy ${name}`,
-      storage_repo: STORAGE_REPO,
-      duration: duration || '5h00m'
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      await gh('POST', RUNNER_REPO, `/actions/workflows/${name}.yml/dispatches`, {
+        ref: 'main',
+        inputs: {
+          machine_id: name,
+          display_name: `Máy ${name}`,
+          storage_repo: STORAGE_REPO,
+          duration: duration || '5h00m'
+        }
+      });
+      return;
+    } catch (e) {
+      lastErr = e;
+      if (attempt < 4) await new Promise(r => setTimeout(r, 2000));
     }
-  });
+  }
+  throw lastErr;
 }
 
 // ----------------- ĐỒNG BỘ TRẠNG THÁI MÁY & STARDESK ID -----------------
 async function syncMachine(name) {
-  const m = R.machines[name] = R.machines[name] || { name, created: Date.now() };
+  const m = store.machines[name] = store.machines[name] || R.machines[name] || { name, created: Date.now() };
   try {
     const listRes = await gh('GET', RUNNER_REPO, `/actions/workflows/${name}.yml/runs?per_page=1`);
     const run = (listRes.workflow_runs && listRes.workflow_runs[0]) || null;
@@ -224,8 +288,6 @@ async function syncMachine(name) {
                 m.stardeskId = idM[1].trim();
                 m.ready = true;
               }
-              const uM = rawLog.match(/User RDP\s*:\s*([^\s(│]+)/i);
-              if (uM) m.user = uM[1].trim();
               const pM = rawLog.match(/Mật khẩu\s*:\s*([^\s(│]+)/i);
               if (pM) m.pass = pM[1].trim();
             }
@@ -243,13 +305,13 @@ async function syncMachine(name) {
 function getButtons(name) {
   return [
     [
-      { id: `in:${name}`, label: '🔐 Xem Thông Tin', style: 'primary' },
-      { id: `st:${name}`, label: '🛑 Tắt Máy', style: 'danger' },
-      { id: `rs:${name}`, label: '🔁 Khởi Động Lại', style: 'secondary' }
+      { id: `in:${name}`, label: '🔐 Xem Thông Tin', style: 'primary', ephemeral: true },
+      { id: `st:${name}`, label: '🛑 Tắt Máy', style: 'danger', ephemeral: true },
+      { id: `rs:${name}`, label: '🔁 Khởi Động Lại', style: 'secondary', ephemeral: true }
     ],
     [
-      { id: `delstorage:${name}`, label: '💽 Xóa Ổ Đĩa (Repo Gốc)', style: 'danger' },
-      { id: `delfile:${name}`, label: '🗑️ Xóa Workflow (Runner)', style: 'danger' }
+      { id: `delstorage:${name}`, label: '💽 Xóa Ổ Đĩa (Repo Gốc)', style: 'danger', ephemeral: true },
+      { id: `delfile:${name}`, label: '🗑️ Xóa Workflow (Runner)', style: 'danger', ephemeral: true }
     ]
   ];
 }
@@ -262,82 +324,95 @@ if (ev === 'button') {
   const [act, name] = customId.split(':');
   if (!name) return;
 
-  if (act === 'in') {
-    const m = await syncMachine(name);
-    const sdText = m.stardeskId ? `\`${m.stardeskId}\`` : '*(Đang cài đặt / Chờ mở máy...)*';
-    const remText = m.remainSec != null ? hms(m.remainSec) : 'N/A';
-    const msg = [
-      `🔐 **THÔNG TIN KẾT NỐI MÁY: ${name.toUpperCase()}**`,
-      `• 🚀 **StarDesk ID:** ${sdText}`,
-      `> 💡 *Mở app StarDesk trên máy tính -> Nhập mã ID ở trên để điều khiển máy!*`,
-      `• 👤 **User RDP:** \`${m.user || 'runneradmin'}\` · 🔐 **MK:** \`${m.pass || 'Aistv@2026'}\``,
-      `• ⏰ **Thời gian còn lại:** **${remText}**`,
-      `• 📦 **Repo Gốc (Lưu trữ):** \`${m.storageRepo || STORAGE_REPO}\` (\`aistv-storage-${name}\`)`,
-      `• 🏃 **Runner Repo (Treo máy):** \`${m.runnerRepo || RUNNER_REPO}\``,
-      m.runUrl ? `• 🔗 **Link Action:** <${m.runUrl}>` : ''
-    ].filter(Boolean).join('\n');
-    return ui.reply({ content: msg, ephemeral: true });
+  const m = store.machines[name] || R.machines[name];
+  const clickerId = userId;
+
+  // 1. Kiểm tra quyền dùng bot
+  if (!isAllowedUser(clickerId)) {
+    return ui.reply({ content: `⛔ Bạn chưa được cấp quyền sử dụng hệ thống máy ảo! Hãy liên hệ Admin (<@${ROOT_ADMIN}>).`, ephemeral: true });
   }
 
+  // 2. Kiểm tra quyền sở hữu máy
+  if (m && m.ownerId && !canManageMachine(m, clickerId)) {
+    return ui.reply({ content: `⛔ Bạn không có quyền điều khiển máy **${name}**! Máy này thuộc quyền sở hữu của <@${m.ownerId}>.`, ephemeral: true });
+  }
+
+  // NÚT: XEM THÔNG TIN
+  if (act === 'in') {
+    const curM = await syncMachine(name);
+    const isOnline = curM.status === 'in_progress' && curM.ready;
+    const statusBadge = isOnline ? '🟢 Online (Sẵn sàng)' : (curM.status === 'in_progress' ? '⏳ Đang khởi động...' : '🔴 Đã tắt');
+    const sdText = curM.stardeskId ? `\`${curM.stardeskId}\`` : '*(Chờ mở máy / Đang cài đặt...)*';
+    const remText = curM.remainSec != null ? hms(curM.remainSec) : 'N/A';
+    const elapText = curM.elapsedSec != null ? hms(curM.elapsedSec) : '0s';
+
+    const card = [
+      `🔐 **THÔNG TIN MÁY: ${name.toUpperCase()}**`,
+      `• 👤 **Chủ sở hữu:** <@${curM.ownerId || (m && m.ownerId) || userId}>`,
+      `• 📡 **Trạng thái:** ${statusBadge}`,
+      `• 🚀 **StarDesk ID:** ${sdText}`,
+      curM.stardeskId ? `> 💡 *Mở app StarDesk trên máy tính -> Nhập mã ID ở trên để điều khiển máy!*` : '',
+      `• 🔐 **Mật khẩu máy:** \`${curM.pass || 'Aistv@2026'}\``,
+      `• ⏰ **Thời gian:** Đã chạy **${elapText}** · Còn lại **${remText}**`
+    ].filter(Boolean).join('\n');
+    return ui.reply({ content: card, ephemeral: true });
+  }
+
+  // NÚT: TẮT MÁY (LƯU Ổ ĐĨA RỒI TẮT)
   if (act === 'st') {
-    const m = await syncMachine(name);
-    if (!m.runId || m.status === 'completed') {
-      return ui.reply({ content: `⚠️ Máy **${name}** hiện không có tiến trình nào đang chạy.`, ephemeral: true });
+    const curM = await syncMachine(name);
+    if (!curM.runId || curM.status === 'completed') {
+      return ui.reply({ content: `⚠️ Máy **${name}** hiện không có phiên nào đang chạy.`, ephemeral: true });
     }
     try {
-      await gh('POST', RUNNER_REPO, `/actions/runs/${m.runId}/cancel`);
-      m.status = 'completed';
-      return ui.reply({ content: `🛑 Đã gửi lệnh tắt máy **${name}** trên \`${RUNNER_REPO}\`.`, ephemeral: true });
+      await gh('POST', RUNNER_REPO, `/actions/runs/${curM.runId}/cancel`);
+      curM.status = 'completed';
+      return ui.reply({ content: `🛑 Đã gửi lệnh lưu ổ đĩa và tắt máy **${name}**!`, ephemeral: true });
     } catch (e) {
       return ui.reply({ content: `❌ Không tắt được máy: ${e.message}`, ephemeral: true });
     }
   }
 
+  // NÚT: KHỞI ĐỘNG LẠI (TẮT LƯU RỒI MỚI CHẠY LẠI)
   if (act === 'rs') {
+    const curM = await syncMachine(name);
+    if (curM.runId && curM.status === 'in_progress') {
+      try { await gh('POST', RUNNER_REPO, `/actions/runs/${curM.runId}/cancel`); } catch {}
+      await new Promise(r => setTimeout(r, 2500));
+    }
     try {
-      await triggerRun(name, '5h00m');
-      return ui.reply({ content: `🔁 Đang kích hoạt lại phiên mới cho máy **${name}** trên \`${RUNNER_REPO}\`!`, ephemeral: true });
+      await triggerRun(name, curM.duration || '5h00m');
+      curM.status = 'starting';
+      curM.startedAt = Date.now();
+      return ui.reply({ content: `🔁 Đã gửi lệnh lưu ổ đĩa, tắt phiên cũ và kích hoạt lại phiên mới cho máy **${name}**!`, ephemeral: true });
     } catch (e) {
       return ui.reply({ content: `❌ Lỗi khởi động lại: ${e.message}`, ephemeral: true });
     }
   }
 
+  // NÚT: XÓA Ổ ĐĨA (REPO GỐC)
   if (act === 'delstorage') {
     const relTag = `aistv-storage-${name}`;
     const stBranch = `aistv-state-${name}`;
-    const parts = [];
     try {
       const rel = await gh('GET', STORAGE_REPO, `/releases/tags/${encodeURIComponent(relTag)}`);
-      if (rel && rel.id) {
-        await gh('DELETE', STORAGE_REPO, `/releases/${rel.id}`);
-        parts.push(`Release \`${relTag}\``);
-      }
+      if (rel && rel.id) await gh('DELETE', STORAGE_REPO, `/releases/${rel.id}`);
     } catch {}
-    try {
-      await gh('DELETE', STORAGE_REPO, `/git/refs/tags/${encodeURIComponent(relTag)}`);
-      parts.push(`Tag \`${relTag}\``);
-    } catch {}
-    try {
-      await gh('DELETE', STORAGE_REPO, `/git/refs/heads/${encodeURIComponent(stBranch)}`);
-      parts.push(`Nhánh \`${stBranch}\``);
-    } catch {}
-    const resMsg = parts.length
-      ? `💽 Đã xóa bộ nhớ máy **${name}** trên Repo Gốc (\`${STORAGE_REPO}\`): ${parts.join(', ')}.`
-      : `ℹ️ Máy **${name}** không có bộ nhớ nào trên Repo Gốc (\`${STORAGE_REPO}\`).`;
-    return ui.reply({ content: resMsg, ephemeral: true });
+    try { await gh('DELETE', STORAGE_REPO, `/git/refs/tags/${encodeURIComponent(relTag)}`); } catch {}
+    try { await gh('DELETE', STORAGE_REPO, `/git/refs/heads/${encodeURIComponent(stBranch)}`); } catch {}
+    return ui.reply({ content: `💽 Đã xóa sạch dữ liệu ổ đĩa của máy **${name}**!`, ephemeral: true });
   }
 
+  // NÚT: XÓA WORKFLOW (RUNNER)
   if (act === 'delfile') {
     const filePath = `.github/workflows/${name}.yml`;
     try {
       const cur = await gh('GET', RUNNER_REPO, `/contents/${filePath}`);
       if (cur && cur.sha) {
-        await gh('DELETE', RUNNER_REPO, `/contents/${filePath}`, {
-          message: `Xóa workflow máy ${name}`,
-          sha: cur.sha
-        });
+        await gh('DELETE', RUNNER_REPO, `/contents/${filePath}`, { message: `Xóa workflow ${name}`, sha: cur.sha });
+        delete store.machines[name];
         delete R.machines[name];
-        return ui.reply({ content: `🗑️ Đã xóa file workflow \`${name}.yml\` trên Runner Repo (\`${RUNNER_REPO}\`).`, ephemeral: true });
+        return ui.reply({ content: `🗑️ Đã xóa máy **${name}** thành công!`, ephemeral: true });
       }
     } catch (e) {
       return ui.reply({ content: `❌ Lỗi xóa file: ${e.message}`, ephemeral: true });
@@ -349,30 +424,80 @@ if (ev === 'button') {
 // ============================================================================
 // XỬ LÝ SỰ KIỆN: LỆNH CHAT (!may ...)
 // ============================================================================
-const raw = (ctx.message && ctx.message.content) || '';
-const a = ctx.args && ctx.args.length ? ctx.args : raw.trim().split(/\s+/).slice(1);
+const raw = String(ctx.content || (ctx.message && ctx.message.content) || ctx.rest || '').trim();
+let words = (ctx.args && Array.isArray(ctx.args) && ctx.args.length)
+  ? [...ctx.args]
+  : raw.split(/\s+/).filter(Boolean);
+
+if (words[0] && /^!may\b/i.test(words[0])) {
+  words.shift();
+}
+
+const a = words;
 const sub = (a[0] || '').toLowerCase();
 const arg = a[1] || '';
 
+// ============================================================================
+// LỆNH PHÂN QUYỀN (CHỈ ROOT ADMIN 946662197168341053)
+// ============================================================================
+if (sub === 'capquyen' || sub === 'grant') {
+  if (!isRootUser(userId)) return say(`⛔ Chỉ Root Admin (<@${ROOT_ADMIN}>) mới có quyền cấp phép sử dụng bot!`);
+  const targetId = (arg || '').replace(/[<@!>]/g, '').trim();
+  if (!targetId || !/^\d{16,21}$/.test(targetId)) return say('Dùng: `!may capquyen <@user hoặc ID>`');
+  store.allowedUsers[targetId] = { id: targetId, by: userDisplay, at: Date.now() };
+  return say(`✅ Đã cấp quyền sử dụng bot máy ảo cho <@${targetId}> (\`${targetId}\`)!`);
+}
+
+if (sub === 'thuquyen' || sub === 'revoke') {
+  if (!isRootUser(userId)) return say(`⛔ Chỉ Root Admin (<@${ROOT_ADMIN}>) mới có quyền thu hồi!`);
+  const targetId = (arg || '').replace(/[<@!>]/g, '').trim();
+  if (targetId === ROOT_ADMIN) return say('❌ Không thể thu hồi quyền của Root Admin!');
+  if (!store.allowedUsers[targetId]) return say(`Người dùng <@${targetId}> chưa được cấp quyền.`);
+  delete store.allowedUsers[targetId];
+  return say(`🗑️ Đã thu hồi quyền sử dụng bot của <@${targetId}>!`);
+}
+
+if (sub === 'dsquyen' || sub === 'listquyen') {
+  if (!isRootUser(userId)) return say(`⛔ Chỉ Root Admin (<@${ROOT_ADMIN}>) mới có quyền xem danh sách!`);
+  const list = Object.keys(store.allowedUsers);
+  const lines = [
+    `👑 **DANH SÁCH NGƯỜI ĐƯỢC PHÉP DÙNG BOT:**`,
+    `• 👑 **Root Admin:** <@${ROOT_ADMIN}> (\`${ROOT_ADMIN}\`)`
+  ];
+  list.filter(id => id !== ROOT_ADMIN).forEach(id => {
+    const u = store.allowedUsers[id];
+    lines.push(`• 👤 <@${id}> (\`${id}\`) - Cấp bởi: ${u.by || 'Admin'}`);
+  });
+  return say(lines.join('\n'));
+}
+
+// ============================================================================
+// BẢO VỆ TẤT CẢ CÁC LỆNH KHÁC: CHỈ CHO PHÉP NGƯỜI ĐÃ ĐƯỢC CẤP QUYỀN
+// ============================================================================
+if (!isAllowedUser(userId)) {
+  return say(`⛔ Bạn chưa được cấp quyền sử dụng hệ thống máy ảo! Hãy liên hệ Admin (<@${ROOT_ADMIN}>) để được cấp phép.`);
+}
+
 // 1. TRỢ GIÚP (!may hoặc !may help)
 if (!sub || sub === 'help') {
-  return say(
-    `**🚀 QUẢN LÝ MÁY ẢO RDP & STARDESK (2 REPO GỐC - RUNNER)**\n` +
-    `• **Repo Gốc (Lưu trữ tất cả):** \`${STORAGE_REPO}\`\n` +
-    `• **Repo Runner (Chỉ treo máy):** \`${RUNNER_REPO}\`\n\n` +
+  let helpMsg = `**🚀 QUẢN LÝ MÁY ẢO STARDESK**\n\n` +
     `**📋 Danh sách lệnh:**\n` +
-    `• \`!may tao <tên> [1h|3h|5h]\` : Tạo workflow từ taomay.yml -> Ném sang Runner Repo -> Kích hoạt chạy\n` +
-    `• \`!may chay <tên> [1h|3h|5h]\` : Chạy lại máy đã có trên Runner Repo\n` +
-    `• \`!may ds\` : Xem danh sách máy, thời gian chạy & StarDesk ID\n` +
-    `• \`!may info <tên>\` : Xem StarDesk ID, User, Password, Uptime & link Actions\n` +
-    `• \`!may tat <tên>\` : Lưu ổ đĩa & tắt máy ngay lập tức\n` +
-    `• \`!may khoi-dong-lai <tên>\` : Hủy phiên cũ và khởi chạy phiên mới\n` +
-    `• \`!may bonho <tên>\` : Xem dung lượng Release & State trên Repo Gốc\n` +
-    `• \`!may xoabonho <tên>\` : Xóa sạch Release & State của máy trên Repo Gốc\n` +
-    `• \`!may xoafile <tên>\` : Xóa file workflow của máy trên Runner Repo\n` +
-    `• \`!may acc\` : Xem/cài đặt thông tin 2 Repo và GitHub Token\n` +
-    `• \`!may log <tên>\` : Lấy link xem trực tiếp tiến trình trên GitHub`
-  );
+    `• \`!may tao <tên> [1h|3h|5h]\` : Tạo máy ảo cá nhân mới & cài StarDesk\n` +
+    `• \`!may chay <tên> [1h|3h|5h]\` : Mở lại máy đã tạo\n` +
+    `• \`!may ds\` : Xem danh sách máy của bạn & StarDesk ID\n` +
+    `• \`!may info <tên>\` : Xem StarDesk ID, Mật khẩu, Thời gian chạy\n` +
+    `• \`!may tat <tên>\` : Lưu ổ đĩa & tắt máy an toàn\n` +
+    `• \`!may khoi-dong-lai <tên>\` : Lưu ổ đĩa, tắt phiên cũ và bật phiên mới\n` +
+    `• \`!may xoa <tên>\` : Xóa máy và toàn bộ dữ liệu ổ đĩa`;
+
+  if (isRootUser(userId)) {
+    helpMsg += `\n\n**👑 Lệnh Admin:**\n` +
+      `• \`!may capquyen <@user|id>\` : Cấp quyền dùng bot cho thành viên\n` +
+      `• \`!may thuquyen <@user|id>\` : Thu hồi quyền dùng bot\n` +
+      `• \`!may dsquyen\` : Xem danh sách thành viên có quyền\n` +
+      `• \`!may acc\` : Xem/Cài đặt cấu hình 2 Repo & GitHub Token`;
+  }
+  return say(helpMsg);
 }
 
 // 2. TẠO MÁY MỚI (!may tao <tên> [thời_gian])
@@ -381,9 +506,12 @@ if (sub === 'tao' || sub === 'taolai') {
   if (!name) return say('Thiếu tên máy. VD: `!may tao chill 5h`');
   if (['bot', 'taomay', 'may-goc'].includes(name)) return say(`Tên \`${name}\` bị giữ chỗ, hãy chọn tên khác.`);
 
-  const d = parseDur(a[2] || '5h00m');
-  say(`⏳ Đang sao chép \`taomay.yml\` từ Repo Gốc (\`${STORAGE_REPO}\`) và ném sang Runner Repo (\`${RUNNER_REPO}\`)...`);
+  const existing = store.machines[name] || R.machines[name];
+  if (existing && existing.ownerId && existing.ownerId !== userId && !isRootUser(userId)) {
+    return say(`⛔ Tên máy **${name}** đã được đăng ký bởi <@${existing.ownerId}>. Vui lòng chọn tên khác!`);
+  }
 
+  const d = parseDur(a[2] || '5h00m');
   try {
     const tplText = await loadTemplate();
     const wfContent = prepareWorkflow(tplText, name, d.input);
@@ -392,27 +520,23 @@ if (sub === 'tao' || sub === 'taolai') {
     // Kích hoạt workflow_dispatch
     await triggerRun(name, d.input);
 
-    const m = R.machines[name] = {
+    const m = store.machines[name] = R.machines[name] = {
       name,
       filePath,
-      runnerRepo: RUNNER_REPO,
-      storageRepo: STORAGE_REPO,
+      ownerId: userId,
+      ownerName: userDisplay,
       duration: d.input,
       durationMin: d.min,
       createdAt: Date.now(),
-      owner: (ctx.user && ctx.user.display) || 'Admin',
-      ownerId: (ctx.user && ctx.user.id) || '',
       status: 'starting'
     };
 
     const confirmMsg = [
       `🚀 **ĐÃ TẠO MÁY [${name.toUpperCase()}] THÀNH CÔNG!**`,
-      `• 📄 **File Workflow:** \`${filePath}\``,
-      `• 🏃 **Nơi treo máy (Runner Repo):** \`${RUNNER_REPO}\``,
-      `• 📦 **Nơi lưu trữ ổ đĩa (Repo Gốc):** \`${STORAGE_REPO}\``,
-      `• ♻️ **Ổ đĩa khởi tạo:** Kế thừa từ \`aistv-storage-may-goc\` trên Repo Gốc`,
+      `• 👤 **Chủ sở hữu:** <@${userId}>`,
+      `• 📡 **Trạng thái:** ⏳ Đang khởi động & cài StarDesk...`,
       `• ⏰ **Thời lượng:** **${d.input}**`,
-      `\n⏳ *Máy đang khởi động & tự động cài StarDesk 1.5.3... Gõ \`!may info ${name}\` sau 2-3 phút để lấy mã StarDesk ID!*`
+      `\n💡 *Vui lòng đợi 2-3 phút để máy mở StarDesk, sau đó gõ \`!may info ${name}\` hoặc bấm nút bên dưới để lấy mã StarDesk ID!*`
     ].join('\n');
 
     return say(confirmMsg, { buttons: getButtons(name) });
@@ -424,15 +548,20 @@ if (sub === 'tao' || sub === 'taolai') {
 // 3. CHẠY LẠI MÁY ĐÃ CÓ (!may chay <tên> [thời_gian])
 if (sub === 'chay' || sub === 'start') {
   const name = nameOk(arg);
-  if (!name) return say('Dùng: `!may chay <tên_máy> [1h|3h|5h]`');
-  const d = parseDur(a[2] || '5h00m');
+  if (!name) return say('Dùng: `!may chay <tên_máy>`');
+  const m = store.machines[name] || R.machines[name];
+  if (m && m.ownerId && !canManageMachine(m, userId)) {
+    return say(`⛔ Bạn không có quyền điều khiển máy **${name}**! Máy này thuộc về <@${m.ownerId}>.`);
+  }
+
+  const d = parseDur(a[2] || (m && m.duration) || '5h00m');
   try {
     await triggerRun(name, d.input);
-    const m = R.machines[name] = R.machines[name] || { name };
-    m.duration = d.input;
-    m.durationMin = d.min;
-    m.status = 'starting';
-    return say(`▶️ Đã gửi lệnh chạy máy **${name}** (${d.input}) trên \`${RUNNER_REPO}\`!\n📦 Dữ liệu sẽ tiếp tục nạp và lưu vào \`${STORAGE_REPO}\`.`, {
+    const curM = store.machines[name] = R.machines[name] = R.machines[name] || { name };
+    curM.duration = d.input;
+    curM.durationMin = d.min;
+    curM.status = 'starting';
+    return say(`▶️ Đã gửi lệnh khởi chạy máy **${name}** (${d.input})!`, {
       buttons: getButtons(name)
     });
   } catch (err) {
@@ -442,16 +571,21 @@ if (sub === 'chay' || sub === 'start') {
 
 // 4. DANH SÁCH MÁY (!may ds)
 if (sub === 'ds' || sub === 'list') {
-  const names = Object.keys(R.machines);
-  if (!names.length) {
-    return say(`😴 Chưa có máy nào trong danh sách. Dùng \`!may tao <tên>\` để tạo máy mới!`);
+  const allNames = Object.keys(store.machines);
+  // Root Admin xem toàn bộ, người thường chỉ xem máy của mình
+  const myNames = isRootUser(userId)
+    ? allNames
+    : allNames.filter(n => store.machines[n] && store.machines[n].ownerId === userId);
+
+  if (!myNames.length) {
+    return say(`😴 Bạn chưa có máy nào. Dùng \`!may tao <tên>\` để tạo máy mới!`);
   }
 
-  say('🔄 Đang đồng bộ thông tin máy ảo từ GitHub Actions...');
-  const lines = [`🖥️ **DANH SÁCH MÁY ẢO TREO TẠI \`${RUNNER_REPO}\`:**`];
+  say('🔄 Đang đồng bộ thông tin máy ảo...');
+  const lines = [`🖥️ **DANH SÁCH MÁY ẢO CỦA BẠN:**`];
   const btnRows = [];
 
-  for (const name of names) {
+  for (const name of myNames) {
     const m = await syncMachine(name);
     let badge = '⚪ Đã tắt';
     if (m.status === 'in_progress') badge = m.ready ? '🟢 Online' : '⏳ Đang khởi tạo...';
@@ -460,9 +594,10 @@ if (sub === 'ds' || sub === 'list') {
     let item = `${badge} **${name}**`;
     if (m.stardeskId) item += ` · 🆔 StarDesk: \`${m.stardeskId}\``;
     if (m.remainSec != null && m.status === 'in_progress') item += ` · ⏰ Còn: **${hms(m.remainSec)}**`;
+    if (isRootUser(userId) && m.ownerId) item += ` · 👤 <@${m.ownerId}>`;
     lines.push(item);
 
-    btnRows.push({ id: `in:${name}`, label: `🔐 ${name}`, style: m.status === 'in_progress' ? 'primary' : 'secondary' });
+    btnRows.push({ id: `in:${name}`, label: `🔐 ${name}`, style: m.status === 'in_progress' ? 'primary' : 'secondary', ephemeral: true });
   }
 
   const rows = [];
@@ -475,24 +610,27 @@ if (sub === 'info' || sub === 'check') {
   const name = nameOk(arg);
   if (!name) return say('Dùng: `!may info <tên_máy>`');
 
-  const m = await syncMachine(name);
-  const isOnline = m.status === 'in_progress' && m.ready;
-  const statusBadge = isOnline ? '🟢 Đang chạy (Sẵn sàng kết nối)' : (m.status === 'in_progress' ? '⏳ Đang khởi động & cài StarDesk...' : (m.status === 'queued' ? '🟡 Đang xếp hàng' : '🔴 Đã tắt'));
+  const m = store.machines[name] || R.machines[name];
+  if (m && m.ownerId && !canManageMachine(m, userId)) {
+    return say(`⛔ Bạn không có quyền xem máy **${name}**! Máy này thuộc quyền sở hữu của <@${m.ownerId}>.`);
+  }
 
-  const sdText = m.stardeskId ? `\`${m.stardeskId}\`` : '*(Chờ mở máy hoặc kiểm tra trên giao diện)*';
-  const remText = m.remainSec != null ? hms(m.remainSec) : 'N/A';
-  const elapText = m.elapsedSec != null ? hms(m.elapsedSec) : '0s';
+  const curM = await syncMachine(name);
+  const isOnline = curM.status === 'in_progress' && curM.ready;
+  const statusBadge = isOnline ? '🟢 Đang chạy (Sẵn sàng kết nối)' : (curM.status === 'in_progress' ? '⏳ Đang khởi động & cài StarDesk...' : (curM.status === 'queued' ? '🟡 Đang xếp hàng' : '🔴 Đã tắt'));
+
+  const sdText = curM.stardeskId ? `\`${curM.stardeskId}\`` : '*(Chờ mở máy / Đang cài đặt...)*';
+  const remText = curM.remainSec != null ? hms(curM.remainSec) : 'N/A';
+  const elapText = curM.elapsedSec != null ? hms(curM.elapsedSec) : '0s';
 
   const card = [
     `🖥️ **THÔNG TIN MÁY: ${name.toUpperCase()}**`,
+    `• 👤 **Chủ sở hữu:** <@${curM.ownerId || (m && m.ownerId) || userId}>`,
     `• 📡 **Trạng thái:** ${statusBadge}`,
     `• 🚀 **StarDesk ID:** ${sdText}`,
-    m.stardeskId ? `> 💡 *Mở app StarDesk trên máy tính của bạn -> Nhập mã ID ở trên để điều khiển máy!*` : '',
-    `• 👤 **User RDP:** \`${m.user || 'runneradmin'}\` · 🔐 **Mật khẩu:** \`${m.pass || 'Aistv@2026'}\``,
-    `• ⏰ **Thời gian:** Đã chạy **${elapText}** · Còn lại **${remText}**`,
-    `• 📦 **Kho lưu trữ (Repo Gốc):** \`${m.storageRepo || STORAGE_REPO}\` (\`aistv-storage-${name}\`)`,
-    `• 🏃 **Nơi treo máy (Runner Repo):** \`${m.runnerRepo || RUNNER_REPO}\``,
-    m.runUrl ? `• 🔗 **Link Action:** <${m.runUrl}>` : ''
+    curM.stardeskId ? `> 💡 *Mở app StarDesk trên máy tính -> Nhập mã ID ở trên để điều khiển máy!*` : '',
+    `• 🔐 **Mật khẩu máy:** \`${curM.pass || 'Aistv@2026'}\``,
+    `• ⏰ **Thời gian:** Đã chạy **${elapText}** · Còn lại **${remText}**`
   ].filter(Boolean).join('\n');
 
   return say(card, { buttons: getButtons(name) });
@@ -502,14 +640,19 @@ if (sub === 'info' || sub === 'check') {
 if (sub === 'tat' || sub === 'stop' || sub === 'dung') {
   const name = nameOk(arg);
   if (!name) return say('Dùng: `!may tat <tên_máy>`');
-  const m = await syncMachine(name);
-  if (!m.runId || m.status === 'completed') {
+  const m = store.machines[name] || R.machines[name];
+  if (m && m.ownerId && !canManageMachine(m, userId)) {
+    return say(`⛔ Bạn không có quyền tắt máy **${name}**! Máy này thuộc về <@${m.ownerId}>.`);
+  }
+
+  const curM = await syncMachine(name);
+  if (!curM.runId || curM.status === 'completed') {
     return say(`Máy **${name}** hiện không có tiến trình nào đang chạy.`);
   }
   try {
-    await gh('POST', RUNNER_REPO, `/actions/runs/${m.runId}/cancel`);
-    m.status = 'completed';
-    return say(`🛑 Đã gửi lệnh tắt máy **${name}** trên \`${RUNNER_REPO}\`.`);
+    await gh('POST', RUNNER_REPO, `/actions/runs/${curM.runId}/cancel`);
+    curM.status = 'completed';
+    return say(`🛑 Đã gửi lệnh lưu ổ đĩa và tắt máy **${name}**.`);
   } catch (err) {
     return say(`❌ Không tắt được máy **${name}**: ${err.message}`);
   }
@@ -519,17 +662,25 @@ if (sub === 'tat' || sub === 'stop' || sub === 'dung') {
 if (sub === 'khoi-dong-lai' || sub === 'khoidonglai' || sub === 'restart') {
   const name = nameOk(arg);
   if (!name) return say('Dùng: `!may khoi-dong-lai <tên_máy>`');
-  const d = parseDur(a[2] || '5h00m');
-  const m = await syncMachine(name);
-  if (m.runId && m.status === 'in_progress') {
-    try { await gh('POST', RUNNER_REPO, `/actions/runs/${m.runId}/cancel`); } catch {}
+  const m = store.machines[name] || R.machines[name];
+  if (m && m.ownerId && !canManageMachine(m, userId)) {
+    return say(`⛔ Bạn không có quyền điều khiển máy **${name}**! Máy này thuộc về <@${m.ownerId}>.`);
+  }
+
+  const d = parseDur(a[2] || (m && m.duration) || '5h00m');
+  const curM = await syncMachine(name);
+  if (curM.runId && curM.status === 'in_progress') {
+    say(`🛑 Đang lưu ổ đĩa và tắt phiên cũ của máy **${name}**...`);
+    try { await gh('POST', RUNNER_REPO, `/actions/runs/${curM.runId}/cancel`); } catch {}
+    await new Promise(r => setTimeout(r, 3000));
   }
   try {
     await triggerRun(name, d.input);
-    m.duration = d.input;
-    m.durationMin = d.min;
-    m.status = 'starting';
-    return say(`🔁 Đang khởi động lại phiên làm việc mới cho máy **${name}** (${d.input}) trên \`${RUNNER_REPO}\`!`, {
+    curM.duration = d.input;
+    curM.durationMin = d.min;
+    curM.status = 'starting';
+    curM.startedAt = Date.now();
+    return say(`🔁 Đã lưu ổ đĩa và kích hoạt phiên mới cho máy **${name}** (${d.input})!`, {
       buttons: getButtons(name)
     });
   } catch (err) {
@@ -537,122 +688,69 @@ if (sub === 'khoi-dong-lai' || sub === 'khoidonglai' || sub === 'restart') {
   }
 }
 
-// 8. KIỂM TRA BỘ NHỚ LƯU TRỮ TRÊN REPO GỐC (!may bonho <tên>)
-if (sub === 'bonho' || sub === 'storage') {
+// 8. XÓA MÁY VÀ DỮ LIỆU (!may xoa <tên>)
+if (sub === 'xoa' || sub === 'del') {
   const name = nameOk(arg);
-  if (!name) return say('Dùng: `!may bonho <tên_máy>`');
-  const relTag = `aistv-storage-${name}`;
-  const stBranch = `aistv-state-${name}`;
-  const lines = [`💽 **BỘ NHỚ LƯU TRỮ CỦA MÁY [${name.toUpperCase()}] TRÊN REPO GỐC (\`${STORAGE_REPO}\`):**`];
-
-  try {
-    const rel = await gh('GET', STORAGE_REPO, `/releases/tags/${encodeURIComponent(relTag)}`);
-    const assets = (rel && rel.assets) || [];
-    const totalBytes = assets.reduce((s, x) => s + (x.size || 0), 0);
-    const mb = (totalBytes / (1024 * 1024)).toFixed(1);
-    lines.push(`• 📦 **Release Ổ Đĩa (${relTag}):** ${mb} MB (${assets.length} file mảnh)`);
-  } catch {
-    lines.push(`• 📦 **Release Ổ Đĩa (${relTag}):** *(Chưa có hoặc đã xóa)*`);
+  if (!name) return say('Dùng: `!may xoa <tên_máy>`');
+  const m = store.machines[name] || R.machines[name];
+  if (m && m.ownerId && !canManageMachine(m, userId)) {
+    return say(`⛔ Bạn không có quyền xóa máy **${name}**! Máy này thuộc về <@${m.ownerId}>.`);
   }
 
-  try {
-    await gh('GET', STORAGE_REPO, `/branches/${encodeURIComponent(stBranch)}`);
-    lines.push(`• 🌿 **Nhánh Git State (${stBranch}):** ✅ Đang tồn tại`);
-  } catch {
-    lines.push(`• 🌿 **Nhánh Git State (${stBranch}):** *(Chưa có hoặc đã xóa)*`);
+  // 1. Tắt tiến trình nếu đang chạy
+  const curM = await syncMachine(name);
+  if (curM.runId && curM.status === 'in_progress') {
+    try { await gh('POST', RUNNER_REPO, `/actions/runs/${curM.runId}/cancel`); } catch {}
   }
 
-  return say(lines.join('\n'));
-}
-
-// 9. XÓA BỘ NHỚ TRÊN REPO GỐC (!may xoabonho <tên>)
-if (sub === 'xoabonho' || sub === 'resetbonho') {
-  const name = nameOk(arg);
-  if (!name) return say('Dùng: `!may xoabonho <tên_máy>`');
-  const relTag = `aistv-storage-${name}`;
-  const stBranch = `aistv-state-${name}`;
-  const parts = [];
-
-  try {
-    const rel = await gh('GET', STORAGE_REPO, `/releases/tags/${encodeURIComponent(relTag)}`);
-    if (rel && rel.id) {
-      await gh('DELETE', STORAGE_REPO, `/releases/${rel.id}`);
-      parts.push(`Release \`${relTag}\``);
-    }
-  } catch {}
-  try {
-    await gh('DELETE', STORAGE_REPO, `/git/refs/tags/${encodeURIComponent(relTag)}`);
-    parts.push(`Tag \`${relTag}\``);
-  } catch {}
-  try {
-    await gh('DELETE', STORAGE_REPO, `/git/refs/heads/${encodeURIComponent(stBranch)}`);
-    parts.push(`Nhánh \`${stBranch}\``);
-  } catch {}
-
-  if (!parts.length) {
-    return say(`ℹ️ Máy **${name}** không có bộ nhớ nào trên Repo Gốc (\`${STORAGE_REPO}\`).`);
-  }
-  return say(`🧹 **[${name}]** Đã xóa sạch bộ nhớ trên Repo Gốc (\`${STORAGE_REPO}\`): ${parts.join(', ')}.`);
-}
-
-// 10. XÓA WORKFLOW TRÊN RUNNER REPO (!may xoafile <tên>)
-if (sub === 'xoafile') {
-  const name = nameOk(arg);
-  if (!name) return say('Dùng: `!may xoafile <tên_máy>`');
+  // 2. Xóa workflow file trên runner repo
   const filePath = `.github/workflows/${name}.yml`;
   try {
     const cur = await gh('GET', RUNNER_REPO, `/contents/${filePath}`);
     if (cur && cur.sha) {
-      await gh('DELETE', RUNNER_REPO, `/contents/${filePath}`, {
-        message: `Xóa workflow máy ${name}`,
-        sha: cur.sha
-      });
-      delete R.machines[name];
-      return say(`🗑️ Đã xóa file workflow \`${filePath}\` trên Runner Repo (\`${RUNNER_REPO}\`).`);
+      await gh('DELETE', RUNNER_REPO, `/contents/${filePath}`, { message: `Xóa workflow ${name}`, sha: cur.sha });
     }
-  } catch (err) {
-    return say(`❌ Không xóa được file workflow: ${err.message}`);
-  }
-}
+  } catch {}
 
-// 11. XÓA MÁY KHỎI BỘ NHỚ (!may xoa <tên>)
-if (sub === 'xoa' || sub === 'del') {
-  const name = nameOk(arg);
-  if (!name) return say('Dùng: `!may xoa <tên_máy>`');
+  // 3. Xóa storage trên repo gốc
+  const relTag = `aistv-storage-${name}`;
+  const stBranch = `aistv-state-${name}`;
+  try {
+    const rel = await gh('GET', STORAGE_REPO, `/releases/tags/${encodeURIComponent(relTag)}`);
+    if (rel && rel.id) await gh('DELETE', STORAGE_REPO, `/releases/${rel.id}`);
+  } catch {}
+  try { await gh('DELETE', STORAGE_REPO, `/git/refs/tags/${encodeURIComponent(relTag)}`); } catch {}
+  try { await gh('DELETE', STORAGE_REPO, `/git/refs/heads/${encodeURIComponent(stBranch)}`); } catch {}
+
+  delete store.machines[name];
   delete R.machines[name];
-  return say(`🗑️ Đã xóa máy **${name}** khỏi danh sách theo dõi của bot.`);
+  return say(`🗑️ Đã xóa máy **${name}** và toàn bộ dữ liệu ổ đĩa thành công!`);
 }
 
-// 12. CẤU HÌNH TÀI KHOẢN & 2 REPO (!may acc)
+// 9. CẤU HÌNH TÀI KHOẢN & 2 REPO (!may acc - CHỈ ROOT ADMIN)
 if (sub === 'acc') {
+  if (!isRootUser(userId)) return say(`⛔ Chỉ Root Admin mới có quyền truy cập cấu hình hệ thống!`);
   const opt = (arg || '').toLowerCase();
   if (opt === 'cai' || opt === 'set') {
     const runRepo = (a[2] || '').trim();
     const stRepo = (a[3] || '').trim();
     const tk = (a[4] || '').trim();
     if (!runRepo || !stRepo || !tk) {
-      return say('Dùng: `!may acc cai <runner_repo> <storage_repo> <token_pat>`\nVD: `!may acc cai ohohhoho82-alt/app ddvdat-glitch/rdp ghp_xxxx`');
+      return say('Dùng: `!may acc cai <runner_repo> <storage_repo> <token_pat>`');
     }
-    R.config.runnerRepo = runRepo;
-    R.config.storageRepo = stRepo;
-    R.config.token = tk;
+    R.config.runnerRepo = store.config.runnerRepo = runRepo;
+    R.config.storageRepo = store.config.storageRepo = stRepo;
+    R.config.token = store.config.token = tk;
     return say(`✅ Đã lưu cấu hình:\n• Runner Repo: \`${runRepo}\`\n• Storage Repo: \`${stRepo}\`\n• Token PAT: \`${tk.slice(0, 6)}***\``);
   }
 
   return say(
-    `⚙️ **CẤU HÌNH HỆ THỐNG 2 REPO HIỆN TẠI:**\n` +
+    `⚙️ **CẤU HÌNH HỆ THỐNG 2 REPO:**\n` +
     `• 🏢 **Repo Gốc (Lưu trữ):** \`${STORAGE_REPO}\`\n` +
     `• 🏃 **Runner Repo (Treo máy):** \`${RUNNER_REPO}\`\n` +
-    `• 🔑 **GitHub PAT Token:** ${GH_TOKEN ? `\`${GH_TOKEN.slice(0, 7)}***\`` : '❌ *Chưa có (cần gán PAT_TOKEN)*'}\n\n` +
-    `👉 Cài đặt/đổi cấu hình bằng:\n\`!may acc cai <runner_repo> <storage_repo> <token_pat>\``
+    `• 🔑 **GitHub PAT Token:** ${GH_TOKEN ? `\`${GH_TOKEN.slice(0, 7)}***\`` : '❌ *Chưa có*'}`
   );
 }
 
-// 13. XEM LOG (!may log <tên>)
-if (sub === 'log') {
-  const name = nameOk(arg);
-  if (!name) return say('Dùng: `!may log <tên_máy>`');
-  const m = await syncMachine(name);
-  if (m.runUrl) return say(`🔗 Link theo dõi log trực tiếp trên GitHub: <${m.runUrl}>`);
-  return say(`Không tìm thấy link run của máy **${name}** trên \`${RUNNER_REPO}\`.`);
-}
+// 10. LỆNH KHÔNG XÁC ĐỊNH
+return say(`❓ Không rõ lệnh: \`${sub}\`. Gõ \`!may\` hoặc \`!may help\` để xem hướng dẫn.`);

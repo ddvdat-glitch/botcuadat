@@ -2,6 +2,7 @@
           const fs = require('fs');
           const path = require('path');
           const http = require('http');
+const https = require('https');
 
           const DATA_PATH = path.join(process.cwd(), process.env.DATA_FILE || 'data.json');
           const BRIDGE_FILE = path.join(process.cwd(), 'rdp-bridge-state.json');
@@ -589,134 +590,464 @@
                     }
                   }
 
-                  // 5. GIAO DIỆN WEB QUẢN LÝ ĐA TÀI KHOẢN GIT, MÁY ẢO & DUCKDNS (/rdp-manager)
+                                                      // ==========================================================================
+                  // CÁC HÀM TIỆN ÍCH GITHUB API & TỰ ĐỘNG TÁI TẠO WORKFLOW
+                  // ==========================================================================
+                  function getRdpConfig() {
+                    const st = loadBridgeState();
+                    st.config = st.config || {};
+                    const storageRepo = st.config.storageRepo || process.env.STORAGE_REPO || 'ddvdat-glitch/rdp';
+                    const runnerRepo = st.config.runnerRepo || process.env.RUNNER_REPO || 'ohohhoho82-alt/app';
+                    const token = st.config.token || process.env.PAT_TOKEN || process.env.RDP_GH_TOKEN || process.env.STORAGE_GH_TOKEN || process.env.GH_TOKEN || '';
+                    const rootAdmin = st.config.rootAdmin || '946662197168341053';
+                    return { storageRepo, runnerRepo, token, rootAdmin };
+                  }
+
+                  function ghRequest(method, repo, endpoint, body, customToken) {
+                    return new Promise((resolve, reject) => {
+                      const cfg = getRdpConfig();
+                      const token = customToken || cfg.token;
+                      const pathUrl = endpoint.startsWith('http')
+                        ? endpoint.replace('https://api.github.com', '')
+                        : (endpoint.startsWith('/repos/') ? endpoint : `/repos/${repo}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`);
+
+                      const dataStr = body ? JSON.stringify(body) : null;
+                      const headers = {
+                        'User-Agent': 'AISTV-RDP-Manager-Web',
+                        'Accept': 'application/vnd.github+json'
+                      };
+                      if (token) headers['Authorization'] = `token ${token}`;
+                      if (dataStr) {
+                        headers['Content-Type'] = 'application/json';
+                        headers['Content-Length'] = Buffer.byteLength(dataStr);
+                      }
+
+                      const req = https.request({
+                        hostname: 'api.github.com',
+                        port: 443,
+                        path: pathUrl,
+                        method: method.toUpperCase(),
+                        headers
+                      }, res => {
+                        let data = '';
+                        res.on('data', chunk => data += chunk);
+                        res.on('end', () => {
+                          if (res.statusCode === 204) return resolve(true);
+                          let json = null;
+                          try { json = JSON.parse(data); } catch { json = null; }
+                          if (res.statusCode >= 200 && res.statusCode < 300) {
+                            return resolve(json != null ? json : data);
+                          }
+                          const errMsg = (json && json.message) || data || `HTTP ${res.statusCode}`;
+                          const err = new Error(errMsg);
+                          err.status = res.statusCode;
+                          err.data = json;
+                          reject(err);
+                        });
+                      });
+
+                      req.on('error', reject);
+                      req.setTimeout(25000, () => {
+                        req.destroy();
+                        reject(new Error('GitHub API request timeout (25s)'));
+                      });
+                      if (dataStr) req.write(dataStr);
+                      req.end();
+                    });
+                  }
+
+                  function loadTaomayTemplate() {
+                    const localCandidates = [
+                      path.join(__dirname, 'taomay.yml'),
+                      path.join(__dirname, 'taomay.yaml'),
+                      path.join(process.cwd(), 'taomay.yml'),
+                      path.join(process.cwd(), 'taomay.yaml'),
+                      path.join(process.cwd(), '.github/workflows/taomay.yml'),
+                      'c:/Users/acc/Downloads/badao/taomay.yml',
+                      'c:/Users/acc/Downloads/badao/taomay.yaml'
+                    ];
+                    for (const lp of localCandidates) {
+                      try {
+                        if (fs.existsSync(lp)) return fs.readFileSync(lp, 'utf8');
+                      } catch {}
+                    }
+                    return null;
+                  }
+
+                  function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
+                    let out = tpl;
+                    out = out.replace(/^name:\s*.*$/m, `name: máy ${name}`);
+                    out = out.replace(/default:\s*'may-phu-2'/g, `default: '${name}'`);
+                    out = out.replace(/default:\s*'Máy Phụ 2'/g, `default: 'Máy ${name}'`);
+                    out = out.replace(/group:\s*stardesk-[^\r\n]+/g, `group: stardesk-${name}`);
+                    out = out.replace(/MACHINE_ID:\s*\${{[^}]+}}/g, `MACHINE_ID: '${name}'`);
+                    out = out.replace(/DISPLAY_NAME:\s*\${{[^}]+}}/g, `DISPLAY_NAME: 'Máy ${name}'`);
+
+                    if (storageRepo) {
+                      out = out.replace(/default:\s*'ddvdat-glitch\/rdp'/g, `default: '${storageRepo}'`);
+                      out = out.replace(/STORAGE_REPO:\s*\${{[^}]+}}/g, `STORAGE_REPO: '${storageRepo}'`);
+                    }
+
+                    if (duration) {
+                      const durVal = duration.includes('h') ? duration : `${duration}h`;
+                      out = out.replace(/(duration:[\s\S]*?default:\s*)'[0-9a-z]+'/i, `$1'${durVal}'`);
+                    }
+
+                    if (pin) {
+                      const cleanPin = pin.replace(/[^A-Za-z0-9]/g, '');
+                      out = out.replace(/(pin_code:[\s\S]*?default:\s*)'[A-Za-z0-9@_.-]+'/i, `$1'${cleanPin}'`);
+                      out = out.replace(/(fixed_password:[\s\S]*?default:\s*)'[A-Za-z0-9@_.-]+'/i, `$1'${cleanPin}'`);
+                    }
+
+                    return out;
+                  }
+
+                  async function dispatchWorkflow(runnerRepo, wfFile, inputs = {}, token) {
+                    return await ghRequest('POST', runnerRepo, `/actions/workflows/${wfFile}/dispatches`, {
+                      ref: 'main',
+                      inputs
+                    }, token);
+                  }
+
+                  async function cancelWorkflowRuns(runnerRepo, wfFile, token) {
+                    try {
+                      const res = await ghRequest('GET', runnerRepo, `/actions/workflows/${wfFile}/runs?status=in_progress&per_page=10`, null, token);
+                      const runs = (res && res.workflow_runs) || [];
+                      for (const r of runs) {
+                        try { await ghRequest('POST', runnerRepo, `/actions/runs/${r.id}/cancel`, null, token); } catch {}
+                      }
+                      const qRes = await ghRequest('GET', runnerRepo, `/actions/workflows/${wfFile}/runs?status=queued&per_page=10`, null, token);
+                      const qRuns = (qRes && qRes.workflow_runs) || [];
+                      for (const r of qRuns) {
+                        try { await ghRequest('POST', runnerRepo, `/actions/runs/${r.id}/cancel`, null, token); } catch {}
+                      }
+                    } catch {}
+                  }
+
+                  // --------------------------------------------------------------------------
+                  // 5.1 API: QUÉT TẤT CẢ FILE WORKFLOW TRÊN RUNNER REPO
+                  // --------------------------------------------------------------------------
+                  if (u === '/api/rdp/scan-workflows' && req.method === 'GET') {
+                    if (!checkAuth(req, body)) return sendJson(401, { ok: false, error: 'Sai mật khẩu Admin' });
+                    const st = loadBridgeState();
+                    const cfg = getRdpConfig();
+                    try {
+                      const contents = await ghRequest('GET', cfg.runnerRepo, '/contents/.github/workflows', null, cfg.token);
+                      if (!Array.isArray(contents)) return sendJson(400, { ok: false, error: `Không đọc được thư mục .github/workflows trên ${cfg.runnerRepo}` });
+                      const ymlFiles = contents.filter(f => f.type === 'file' && /\.(ya?ml)$/i.test(f.name));
+                      const ignored = ['taomay.yml', 'taomay.yaml', 'taomaygoc.yml', 'bot.yml', 'botcuadat.yml'];
+                      const machineFiles = ymlFiles.filter(f => !ignored.includes(f.name.toLowerCase()));
+
+                      const list = [];
+                      st.machines = st.machines || {};
+
+                      for (const f of machineFiles) {
+                        try {
+                          const fDetail = await ghRequest('GET', cfg.runnerRepo, `/contents/${f.path}`, null, cfg.token);
+                          if (!fDetail || !fDetail.content) continue;
+                          const rawYml = Buffer.from(fDetail.content.replace(/\s+/g, ''), 'base64').toString('utf8');
+                          const idM = rawYml.match(/machine_id:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+                          const nameM = rawYml.match(/display_name:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+                          const durM = rawYml.match(/duration:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+                          const pinM = rawYml.match(/(?:pin_code|fixed_password):[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+                          const storageM = rawYml.match(/storage_repo:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+
+                          const mId = (idM && idM[1]) || f.name.replace(/\.(ya?ml)$/i, '');
+                          const dName = (nameM && nameM[1]) || `Máy ${mId}`;
+                          const dur = (durM && durM[1]) || '5h00m';
+                          const pin = (pinM && pinM[1]) || 'Aistv2026';
+                          const stRepo = (storageM && storageM[1]) || cfg.storageRepo;
+
+                          const isLatest = rawYml.includes('uuyc_4.43.1.exe') && rawYml.includes('ProtectedData::Protect') && rawYml.includes('StarDesk_1.5.3.exe');
+
+                          const cur = st.machines[mId] = st.machines[mId] || { name: mId, created: Date.now() };
+                          cur.name = mId;
+                          cur.displayName = dName;
+                          cur.duration = dur;
+                          cur.gvPin = pin;
+                          cur.storageRepo = stRepo;
+                          cur.repo = cfg.runnerRepo;
+                          cur.isLatestTemplate = isLatest;
+
+                          let lastRun = null;
+                          try {
+                            const rRes = await ghRequest('GET', cfg.runnerRepo, `/actions/workflows/${f.name}/runs?per_page=1`, null, cfg.token);
+                            if (rRes && rRes.workflow_runs && rRes.workflow_runs[0]) {
+                              const r = rRes.workflow_runs[0];
+                              lastRun = {
+                                id: r.id,
+                                status: r.status,
+                                conclusion: r.conclusion,
+                                runUrl: r.html_url,
+                                startedAt: r.run_started_at || r.created_at
+                              };
+                              cur.runId = r.id;
+                              cur.status = r.status;
+                              cur.conclusion = r.conclusion;
+                              if (r.status === 'in_progress') cur.isOnline = true;
+                              else if (r.status === 'completed') cur.isOnline = false;
+                            }
+                          } catch {}
+
+                          list.push({
+                            file: f.name,
+                            path: f.path,
+                            machineId: mId,
+                            displayName: dName,
+                            duration: dur,
+                            pin,
+                            storageRepo: stRepo,
+                            isLatestTemplate: isLatest,
+                            lastRun
+                          });
+                        } catch {}
+                      }
+                      saveBridgeState(st);
+                      return sendJson(200, { ok: true, runnerRepo: cfg.runnerRepo, storageRepo: cfg.storageRepo, workflows: list });
+                    } catch (err) {
+                      return sendJson(500, { ok: false, error: err.message });
+                    }
+                  }
+
+                  // --------------------------------------------------------------------------
+                  // 5.2 API: TÁI TẠO & NÂNG CẤP WORKFLOW LÊN BẢN MỚI NHẤT
+                  // --------------------------------------------------------------------------
+                  if (u === '/api/rdp/rebuild-workflows' && req.method === 'POST') {
+                    if (!checkAuth(req, body)) return sendJson(401, { ok: false, error: 'Sai mật khẩu Admin' });
+                    const st = loadBridgeState();
+                    const cfg = getRdpConfig();
+                    const targetMachine = body.machine || 'all';
+
+                    let tpl = loadTaomayTemplate();
+                    if (!tpl) {
+                      try {
+                        const f = await ghRequest('GET', cfg.storageRepo, '/contents/taomay.yml', null, cfg.token);
+                        if (f && f.content) tpl = Buffer.from(f.content.replace(/\s+/g, ''), 'base64').toString('utf8');
+                      } catch {}
+                    }
+                    if (!tpl) return sendJson(400, { ok: false, error: 'Không tìm thấy file mẫu taomay.yml' });
+
+                    try {
+                      const contents = await ghRequest('GET', cfg.runnerRepo, '/contents/.github/workflows', null, cfg.token);
+                      const ymlFiles = contents.filter(f => f.type === 'file' && /\.(ya?ml)$/i.test(f.name));
+                      const ignored = ['taomay.yml', 'taomay.yaml', 'taomaygoc.yml', 'bot.yml', 'botcuadat.yml'];
+                      const machineFiles = ymlFiles.filter(f => !ignored.includes(f.name.toLowerCase()));
+
+                      const targets = targetMachine === 'all'
+                        ? machineFiles
+                        : machineFiles.filter(f => f.name.toLowerCase().startsWith(targetMachine.toLowerCase() + '.'));
+
+                      const updated = [];
+                      for (const f of targets) {
+                        try {
+                          const fDetail = await ghRequest('GET', cfg.runnerRepo, `/contents/${f.path}`, null, cfg.token);
+                          if (!fDetail || !fDetail.content) continue;
+                          const rawYml = Buffer.from(fDetail.content.replace(/\s+/g, ''), 'base64').toString('utf8');
+                          const idM = rawYml.match(/machine_id:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+                          const durM = rawYml.match(/duration:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+                          const pinM = rawYml.match(/(?:pin_code|fixed_password):[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+
+                          const mId = (idM && idM[1]) || f.name.replace(/\.(ya?ml)$/i, '');
+                          const dur = (durM && durM[1]) || '5h00m';
+                          const pin = (pinM && pinM[1]) || 'Aistv2026';
+
+                          const newContent = buildVmWorkflow(tpl, mId, dur, pin, cfg.storageRepo);
+                          const b64 = Buffer.from(newContent, 'utf8').toString('base64');
+                          await ghRequest('PUT', cfg.runnerRepo, `/contents/${f.path}`, {
+                            message: `[AISTV] Tự động nâng cấp workflow máy ${mId} (GameViewer 4.43.1 + StarDesk 1.5.3 + DPAPI)`,
+                            content: b64,
+                            sha: fDetail.sha
+                          }, cfg.token);
+
+                          if (st.machines && st.machines[mId]) {
+                            st.machines[mId].isLatestTemplate = true;
+                            st.machines[mId].upgradedAt = Date.now();
+                          }
+                          updated.push(mId);
+                          await new Promise(r => setTimeout(r, 800));
+                        } catch (e) {
+                          console.error('Lỗi nâng cấp workflow:', e.message);
+                        }
+                      }
+                      saveBridgeState(st);
+                      return sendJson(200, { ok: true, updated, count: updated.length });
+                    } catch (err) {
+                      return sendJson(500, { ok: false, error: err.message });
+                    }
+                  }
+
+                  // --------------------------------------------------------------------------
+                  // 5.3 API: TẠO MÁY MỚI TRỰC TIẾP TỪ WEB
+                  // --------------------------------------------------------------------------
+                  if (u === '/api/rdp/create-vm' && req.method === 'POST') {
+                    if (!checkAuth(req, body)) return sendJson(401, { ok: false, error: 'Sai mật khẩu Admin' });
+                    const st = loadBridgeState();
+                    const cfg = getRdpConfig();
+
+                    const rawName = String(body.name || '').trim().toLowerCase();
+                    const cleanName = (rawName.replace(/[^a-z0-9\-]/g, '-').replace(/\-+/g, '-').replace(/^\-|\-$/g, '')) || `may-${Date.now().toString(36).slice(-4)}`;
+                    const displayName = String(body.displayName || `Máy ${cleanName}`).trim();
+                    const duration = String(body.duration || '5h00m').trim();
+                    const pin = String(body.pin || 'Aistv2026').trim().replace(/[^A-Za-z0-9]/g, '');
+                    const runnerRepo = String(body.runnerRepo || cfg.runnerRepo).trim();
+                    const storageRepo = String(body.storageRepo || cfg.storageRepo).trim();
+
+                    let tpl = loadTaomayTemplate();
+                    if (!tpl) {
+                      try {
+                        const f = await ghRequest('GET', storageRepo, '/contents/taomay.yml', null, cfg.token);
+                        if (f && f.content) tpl = Buffer.from(f.content.replace(/\s+/g, ''), 'base64').toString('utf8');
+                      } catch {}
+                    }
+                    if (!tpl) return sendJson(400, { ok: false, error: 'Không tìm thấy file mẫu taomay.yml' });
+
+                    const wfContent = buildVmWorkflow(tpl, cleanName, duration, pin, storageRepo);
+                    const b64 = Buffer.from(wfContent, 'utf8').toString('base64');
+                    const wfPath = `.github/workflows/${cleanName}.yml`;
+
+                    try {
+                      let sha = undefined;
+                      try {
+                        const exist = await ghRequest('GET', runnerRepo, `/contents/${wfPath}`, null, cfg.token);
+                        if (exist && exist.sha) sha = exist.sha;
+                      } catch {}
+
+                      await ghRequest('PUT', runnerRepo, `/contents/${wfPath}`, {
+                        message: `[AISTV] Khởi tạo máy ảo ${cleanName} trên Runner Repo`,
+                        content: b64,
+                        sha
+                      }, cfg.token);
+
+                      await new Promise(r => setTimeout(r, 1500));
+                      await dispatchWorkflow(runnerRepo, `${cleanName}.yml`, {
+                        machine_id: cleanName,
+                        display_name: displayName,
+                        duration,
+                        pin_code: pin
+                      }, cfg.token);
+
+                      st.machines = st.machines || {};
+                      st.machines[cleanName] = {
+                        name: cleanName,
+                        displayName,
+                        duration,
+                        gvPin: pin,
+                        storageRepo,
+                        repo: runnerRepo,
+                        ownerId: String(body.ownerId || '').trim(),
+                        owner: String(body.ownerName || body.ownerId || '').trim(),
+                        status: 'in_progress',
+                        isOnline: false,
+                        isLatestTemplate: true,
+                        created: Date.now()
+                      };
+                      saveBridgeState(st);
+                      return sendJson(200, { ok: true, machine: cleanName, message: `Đã tạo máy [${displayName}] thành công!` });
+                    } catch (err) {
+                      return sendJson(500, { ok: false, error: err.message });
+                    }
+                  }
+
+                  // --------------------------------------------------------------------------
+                  // 5.4 API: ĐIỀU KHIỂN TIẾN TRÌNH MÁY ẢO (START / RESTART / STOP / DELETE)
+                  // --------------------------------------------------------------------------
+                  if (u === '/api/rdp/control-vm' && req.method === 'POST') {
+                    if (!checkAuth(req, body)) return sendJson(401, { ok: false, error: 'Sai mật khẩu Admin' });
+                    const st = loadBridgeState();
+                    const cfg = getRdpConfig();
+                    const mId = String(body.machine || '').trim().toLowerCase();
+                    const action = String(body.action || '').trim().toLowerCase();
+                    const m = (st.machines || {})[mId];
+                    const runnerRepo = (m && m.repo) || cfg.runnerRepo;
+
+                    try {
+                      if (action === 'start') {
+                        await dispatchWorkflow(runnerRepo, `${mId}.yml`, {}, cfg.token);
+                        if (m) { m.status = 'queued'; m.isOnline = true; }
+                        saveBridgeState(st);
+                        return sendJson(200, { ok: true, message: `Đã gửi lệnh chạy phiên mới cho máy [${mId}]` });
+                      } else if (action === 'restart') {
+                        await cancelWorkflowRuns(runnerRepo, `${mId}.yml`, cfg.token);
+                        await new Promise(r => setTimeout(r, 2000));
+                        await dispatchWorkflow(runnerRepo, `${mId}.yml`, {}, cfg.token);
+                        if (m) { m.status = 'queued'; m.isOnline = true; }
+                        saveBridgeState(st);
+                        return sendJson(200, { ok: true, message: `Đã hủy phiên cũ và khởi chạy phiên mới cho [${mId}]` });
+                      } else if (action === 'stop') {
+                        await cancelWorkflowRuns(runnerRepo, `${mId}.yml`, cfg.token);
+                        if (m) { m.status = 'Stopped'; m.isOnline = false; }
+                        saveBridgeState(st);
+                        return sendJson(200, { ok: true, message: `Đã dừng toàn bộ tiến trình cho máy [${mId}]` });
+                      } else if (action === 'delete') {
+                        await cancelWorkflowRuns(runnerRepo, `${mId}.yml`, cfg.token);
+                        try {
+                          const exist = await ghRequest('GET', runnerRepo, `/contents/.github/workflows/${mId}.yml`, null, cfg.token);
+                          if (exist && exist.sha) {
+                            await ghRequest('DELETE', runnerRepo, `/contents/.github/workflows/${mId}.yml`, {
+                              message: `[AISTV] Xóa máy ảo ${mId}`,
+                              sha: exist.sha
+                            }, cfg.token);
+                          }
+                        } catch {}
+                        delete st.machines[mId];
+                        saveBridgeState(st);
+                        return sendJson(200, { ok: true, message: `Đã xóa file workflow và cấu hình máy [${mId}]` });
+                      } else {
+                        return sendJson(400, { ok: false, error: 'Hành động không hợp lệ' });
+                      }
+                    } catch (err) {
+                      return sendJson(500, { ok: false, error: err.message });
+                    }
+                  }
+
+                  // --------------------------------------------------------------------------
+                  // 5.5 API: CHỈNH SỬA THÔNG TIN MÁY ẢO
+                  // --------------------------------------------------------------------------
+                  if (u === '/api/rdp/edit-vm' && req.method === 'POST') {
+                    if (!checkAuth(req, body)) return sendJson(401, { ok: false, error: 'Sai mật khẩu Admin' });
+                    const st = loadBridgeState();
+                    const mId = String(body.machine || '').trim().toLowerCase();
+                    if (!mId || !st.machines || !st.machines[mId]) return sendJson(404, { ok: false, error: 'Không tìm thấy máy' });
+
+                    const cur = st.machines[mId];
+                    if (body.displayName) cur.displayName = String(body.displayName).trim();
+                    if (body.gvPin) cur.gvPin = String(body.gvPin).trim().replace(/[^A-Za-z0-9]/g, '');
+                    if (body.ownerId !== undefined) cur.ownerId = String(body.ownerId).trim();
+                    if (body.ownerName !== undefined) cur.owner = String(body.ownerName).trim();
+                    if (body.duration) cur.duration = String(body.duration).trim();
+                    if (body.storageRepo) cur.storageRepo = String(body.storageRepo).trim();
+
+                    saveBridgeState(st);
+                    return sendJson(200, { ok: true, data: cur });
+                  }
+
+                  // --------------------------------------------------------------------------
+                  // 5.6 API: LƯU CẤU HÌNH HỆ THỐNG (2 REPO, TOKEN, ADMIN ID)
+                  // --------------------------------------------------------------------------
+                  if (u === '/api/rdp/save-system-config' && req.method === 'POST') {
+                    if (!checkAuth(req, body)) return sendJson(401, { ok: false, error: 'Sai mật khẩu Admin' });
+                    const st = loadBridgeState();
+                    st.config = st.config || {};
+                    if (body.storageRepo) st.config.storageRepo = String(body.storageRepo).trim();
+                    if (body.runnerRepo) st.config.runnerRepo = String(body.runnerRepo).trim();
+                    if (body.token) st.config.token = String(body.token).trim();
+                    if (body.rootAdmin) st.config.rootAdmin = String(body.rootAdmin).trim();
+                    saveBridgeState(st);
+                    return sendJson(200, { ok: true, config: st.config });
+                  }
+
+
                   if (u === '/rdp-manager') {
                     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-                    return res.end(`<!DOCTYPE html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-                    <title>Quản Lý RDP Đa Tài Khoản Git & DuckDNS</title>
-                    <style>
-                      *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
-                      body{background:#0b1120;color:#f8fafc;margin:0;padding:20px}
-                      .wrap{max-width:1150px;margin:0 auto}
-                      .nav{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
-                      .nav a{padding:8px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;background:#1e293b;color:#94a3b8;border:1px solid #334155}
-                      .nav a.act{background:#0284c7;color:#fff;border-color:#0284c7}
-                      .card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:18px;margin-bottom:18px}
-                      h1,h2{margin:0 0 12px 0;color:#38bdf8}
-                      input,select,button{padding:9px 12px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;margin:4px}
-                      button{background:#0284c7;border:none;cursor:pointer;font-weight:600}
-                      button.green{background:#10b981} button.warn{background:#d97706} button.danger{background:#dc2626} button.purple{background:#8b5cf6}
-                      table{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}
-                      th,td{border-bottom:1px solid #334155;padding:8px;text-align:left}
-                      .badge{padding:3px 8px;border-radius:6px;font-size:12px;font-weight:600}
-                    </style></head><body><div class="wrap">
-                      <div class="nav">
-                        <a href="/rdp-manager" class="act">🎛️ Quản Lý Đa Acc Git & RDP</a>
-                        <a href="/rdp-files" style="background:#065f46;color:#a7f3d0;border-color:#047857">📥 Trang Nhận & Quản Lý File Máy Ảo →</a>
-                        <a href="/">🤖 Dashboard Bot Discord</a>
-                      </div>
-                      <div class="card">
-                        <h1>🎛️ Trung Tâm Quản Lý RDP & Đa Acc GitHub (datdemo.duckdns.org)</h1>
-                        <div>Mật khẩu Admin: <input type="password" id="pass" placeholder="Nhập ADMIN_PASSWORD"> <button onclick="loadAll()">🔄 Tải Dữ Liệu</button> <span id="msg"></span></div>
-                      </div>
-                      <div class="card">
-                        <h2>1. Quản Lý Nhiều Tài Khoản GitHub (Token & Repo)</h2>
-                        <div>
-                          <input id="acc_alias" placeholder="Tên gợi nhớ (VD: acc1)">
-                          <input id="acc_repo" placeholder="owner/repo (VD: user/rdp-repo)">
-                          <input id="acc_token" type="password" placeholder="PAT Token (ghp_...)">
-                          <input id="acc_branch" placeholder="Nhánh (main)" value="main" style="width:100px">
-                          <input id="acc_tpl" placeholder="File mẫu (taomay.yaml)" value="taomay.yaml" style="width:140px">
-                          <button onclick="addAcc()">➕ Lưu Tài Khoản Git</button>
-                        </div>
-                        <table id="tbl_acc"><thead><tr><th>Alias</th><th>Repo</th><th>Nhánh</th><th>Mẫu</th><th>Mặc định</th><th>Thao tác</th></tr></thead><tbody></tbody></table>
-                      </div>
-                      <div class="card">
-                        <h2>2. Gán / Đánh Dấu ID Máy Cho Người Dùng Discord</h2>
-                        <div>
-                          <input id="as_machine" placeholder="Tên máy (VD: may-1)">
-                          <input id="as_uid" placeholder="Discord User ID">
-                          <input id="as_uname" placeholder="Tên hiển thị">
-                          <input id="as_acc" placeholder="Alias Acc Git (tùy chọn)">
-                          <button onclick="assignMachine()">🏷️ Gán Quyền Máy</button>
-                        </div>
-                      </div>
-                      <div class="card">
-                        <div style="display:flex;justify-content:space-between;align-items:center">
-                          <h2>3. Danh Sách Máy Ảo & Điều Khiển Trực Tiếp Qua IP</h2>
-                          <a href="/rdp-files" style="color:#38bdf8;text-decoration:none;font-weight:600">📥 Xem Trang Nhận File Máy Ảo →</a>
-                        </div>
-                        <table id="tbl_vm"><thead><tr><th>ID Máy</th><th>Runner / Kho Gốc</th><th>Chủ sở hữu</th><th>StarDesk ID</th><th>Tài khoản / MK</th><th>Trạng thái / Phiên</th><th>Gửi lệnh & Prompt</th></tr></thead><tbody></tbody></table>
-                      </div>
-                    </div>
-                    <script>
-                      const P = () => document.getElementById('pass').value;
-                      async function api(path, method='GET', body=null) {
-                        const r = await fetch(path + '?pass=' + encodeURIComponent(P()), {
-                          method, headers: {'Content-Type':'application/json','x-admin-password':P()},
-                          body: body ? JSON.stringify(body) : undefined
-                        });
-                        return await r.json();
-                      }
-                      async function loadAll() {
-                        const j = await api('/api/rdp/state');
-                        if (!j.ok) { document.getElementById('msg').innerText = '❌ ' + j.error; return; }
-                        document.getElementById('msg').innerText = '✅ Đã đồng bộ | DuckDNS: ' + j.duckdnsDomain + ' (' + j.tailscaleIp + ')';
-                        const accs = j.data.accounts || {};
-                        const def = j.data.defaultAccount || '';
-                        document.querySelector('#tbl_acc tbody').innerHTML = Object.values(accs).map(a => \`
-                          <tr><td><b>\${a.alias}</b></td><td>\${a.repo}</td><td>\${a.branch}</td><td>\${a.template}</td>
-                          <td>\${a.alias===def?'<span class="badge" style="background:#065f46">Mặc định</span>':\`<button onclick="setDef('\${a.alias}')">Chọn</button>\`}</td>
-                          <td><button class="danger" onclick="delAcc('\${a.alias}')">Xóa</button></td></tr>\`).join('');
-                        const vms = j.data.machines || {};
-                        document.querySelector('#tbl_vm tbody').innerHTML = Object.values(vms).map(m => {
-                          const i = m.info || {};
-                          const rem = i.remainSeconds != null ? Math.floor(i.remainSeconds/3600)+'h '+Math.floor((i.remainSeconds%3600)/60)+'m' : '?';
-                          const onlineBadge = m.isOnline ? '<span class="badge" style="background:#065f46">🟢 Online</span>' : '<span class="badge" style="background:#7f1d1d">🔴 Offline</span>';
-                          const sid = m.currentSessionId ? ('<br><small style="color:#94a3b8">Phiên: '+m.currentSessionId+'</small>') : '';
-                          const fileTag = m.lastFileReceived ? ('<br><small style="color:#a7f3d0">📄 '+m.lastFileReceived+'</small>') : '';
-                          return \`<tr>
-                            <td><b>\${m.name}</b><br><small>Run: \${m.runId||'-'}</small>\${fileTag}</td>
-                            <td>\${m.repo||'-'}<br><small>\${m.accName||'default'}</small></td>
-                            <td>\${m.owner||'-'}<br><small>\${m.ownerId||''}</small></td>
-                            <td><code>\${i.ip||'-'}</code><br><small><a href="\${i.panel||'#'}" target="_blank" style="color:#38bdf8">Web 8080</a> | <a href="\${i.sunshine||'#'}" target="_blank" style="color:#fbbf24">Sunshine</a></small></td>
-                            <td><code>\${i.user||'runneradmin'}</code><br><code>\${i.pass||'***'}</code></td>
-                            <td>\${onlineBadge} \${m.status||'-'}<br><small>Còn: \${rem}</small>\${sid}</td>
-                            <td>
-                              <button onclick="vmCmd('\${m.name}','ping')">🔍 Check</button>
-                              <button onclick="showPrompt('\${m.name}')" class="purple">📝 Prompt</button>
-                              <button onclick="location.href='/rdp-files'" class="green">📄 File</button>
-                              <button onclick="downloadVmFile('\${m.name}')">⬇️ Tải</button>
-                              <button class="warn" onclick="vmCmd('\${m.name}','restart')">🔁 Khởi động</button>
-                              <button class="danger" onclick="vmCmd('\${m.name}','stop')">🛑 Tắt</button>
-                            </td>
-                          </tr>\`;
-                        }).join('');
-                      }
-                      function downloadVmFile(mName) {
-                        window.open('/api/rdp/download-file?machine=' + encodeURIComponent(mName) + '&pass=' + encodeURIComponent(P()), '_blank');
-                      }
-                      async function showPrompt(mName) {
-                        const r = await api('/api/rdp/prompt?machine=' + encodeURIComponent(mName));
-                        if (r.ok && r.prompt) alert(r.prompt);
-                        else alert('Chưa có auto-prompt cho máy ' + mName);
-                      }
-                      async function addAcc() {
-                        await api('/api/rdp/config','POST',{action:'add_account',alias:acc_alias.value,repo:acc_repo.value,token:acc_token.value,branch:acc_branch.value,template:acc_tpl.value});
-                        loadAll();
-                      }
-                      async function delAcc(alias) { await api('/api/rdp/config','POST',{action:'del_account',alias}); loadAll(); }
-                      async function setDef(alias) { await api('/api/rdp/config','POST',{action:'set_default_account',alias}); loadAll(); }
-                      async function assignMachine() {
-                        await api('/api/rdp/config','POST',{action:'assign_machine',machine:as_machine.value,ownerId:as_uid.value,ownerName:as_uname.value,accName:as_acc.value});
-                        loadAll();
-                      }
-                      async function vmCmd(machine, cmd) {
-                        const r = await api('/api/rdp/vm-cmd','POST',{machine,cmd});
-                        alert(JSON.stringify(r, null, 2));
-                        loadAll();
-                      }
-                    </script></body></html>`);
+                    const candidates = [
+                      path.join(__dirname, 'rdp-manager.html'),
+                      path.resolve('botcuadat-main/botcuadat-main/rdp-manager.html'),
+                      path.resolve('rdp-manager.html')
+                    ];
+                    for (const cp of candidates) {
+                      if (fs.existsSync(cp)) return res.end(fs.readFileSync(cp, 'utf8'));
+                    }
+                    return res.end('<h1>404 Không tìm thấy rdp-manager.html</h1>');
                   }
 
                   // 6. GIAO DIỆN WEB TRANG NHẬN & QUẢN LÝ FILE MÁY ẢO (/rdp-files & /rdp-receiver)
