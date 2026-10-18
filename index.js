@@ -266,7 +266,7 @@ function cleanScript(s = {}) {
     channels: String(s.channels || ''),
     fromIds: String(s.fromIds || ''),
     timeoutMs: Number(s.timeoutMs) === 0 ? 0 : clampNum(s.timeoutMs || 5000, 500, 86400000),   // v2: 0 = KHÔNG giới hạn
-    code: String(s.code || '').slice(0, 100000)
+    code: String(s.code || '').slice(0, 500000)
   };
 }
 
