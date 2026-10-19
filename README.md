@@ -94,7 +94,7 @@ flowchart TB
 
 ---
 
-## 2. Cụm Máy Ảo RDP & Cloud Gaming (Kiến Trúc 2-Repo Độc Quyền)
+## 2. Cụm Máy Ảo 
 
 ### Mô hình 2-Repo & Phân luồng Token
 Nhằm tối ưu hóa thời gian tính toán miễn phí (free compute minutes) và bảo vệ dữ liệu tuyệt đối, hệ thống tách rời thành **2 Repository riêng biệt**:
@@ -114,7 +114,7 @@ Nhằm tối ưu hóa thời gian tính toán miễn phí (free compute minutes)
 
 ---
 
-### Cơ chế Ổ đĩa Ảo VHDX Vĩnh Cửu & Roaming Session
+### Cơ chế Ổ đĩa Ảo VHDX & Roaming Session
 - Khi máy ảo được kích hoạt: Workflow tự động kiểm tra tag `aistv-storage-{machine_id}` trên Repo Gốc. Nếu đã có bản lưu, workflow sẽ kéo toàn bộ tệp `.vhdx` về và mount trực tiếp vào hệ thống dưới dạng ổ đĩa riêng `X:\`.
 - Khi người dùng gửi lệnh tắt máy hoặc hết thời lượng (1h, 3h, 5h00m): Tiến trình ngầm giải phóng ổ đĩa, nén tệp VHDX và upload đè bản mới nhất lên GitHub Release.
 - **SID Cleanup & Roaming DPAPI**: Bot tích hợp script PowerShell tự động chuẩn hóa Security Identifier (SID) và sao lưu thư mục `DPAPI MasterKey` của Windows, giúp **duy trì trạng thái đăng nhập vĩnh viễn** của tài khoản NetEase GameViewer và trình duyệt Chrome mà không bị mất phiên giữa các lần bật/tắt.
