@@ -1770,6 +1770,7 @@ function getRdpVars(uid, extraVars = {}) {
     const icon = isOnline ? '🟢' : (m.status === 'in_progress' ? '⏳' : '🔴');
     const idText = m.gvId ? `\`${m.gvId}\`` : '*(Chờ cấp ID)*';
     const pinText = rdp.pinMasked !== false ? '`••••••••`' : `\`${m.gvPin || 'Aistv2026'}\``;
+    const durText = m.remainSec != null ? `Còn: **${hms(m.remainSec)}**` : `Thời lượng: **${m.duration || '5h'}**`;
     const ownerText = m.ownerId ? (m.ownerId === cfg.rootAdmin ? '👑 Admin' : `<@${m.ownerId}>`) : 'Chưa gán';
     cards.push(`• ${icon} **${(m.displayName || m.name || k).toUpperCase()}** │ 🆔 ID: ${idText} │ 🔑 PIN: ${pinText} │ 👤 Chủ: ${ownerText} │ ⏰ ${durText}`);
   }
