@@ -1614,14 +1614,14 @@
     "menus": [
       {
         "id": "main",
-        "name": "Bảng điều khiển chính",
+        "name": "Bảng Danh Sách Máy Sở Hữu",
         "ownerOnly": false,
         "content": "",
         "embed": {
           "enabled": true,
           "color": "#8b5cf6",
-          "title": "☯️ BẢNG ĐIỀU KHIỂN MÁY ẢO GAMEVIEWER & STARDESK",
-          "description": "📊 **Thống kê:** 🟢 Online: **{onlineCount}** │ 🔴 Offline: **{offlineCount}** │ 📦 Tổng: **{totalCount}** máy\n🏃 **Runner Repo:** `{runnerRepo}` │ 💽 **Kho Lưu Ổ:** `{storageRepo}`\n\n{machineList}",
+          "title": "🎮 DANH SÁCH MÁY ẢO CỦA BẠN",
+          "description": "👤 **Chủ sở hữu:** {user}\n📊 **Thống kê:** 🟢 Online: **{onlineCount}** │ 🔴 Offline: **{offlineCount}** │ 📦 Tổng: **{totalCount}** máy sở hữu\n🏃 **Runner Repo:** `{runnerRepo}` │ 💽 **Kho Lưu Ổ:** `{storageRepo}`\n\n{machineList}\n\n💡 *Bấm trực tiếp vào nút tên máy bên dưới để mở Bảng Điều Khiển Chi Tiết!*",
           "url": "",
           "thumbnail": "",
           "image": "",
@@ -1630,7 +1630,7 @@
             "icon": ""
           },
           "footer": {
-            "text": "Hệ thống tự động đồng bộ • Bấm [⚙️ Quản Lý Ẩn] để thao tác riêng tư",
+            "text": "Chỉ hiển thị máy bạn sở hữu • Được Admin 946662197168341053 chứng thực",
             "icon": ""
           },
           "timestamp": true,
@@ -1639,36 +1639,16 @@
         "rows": [
           [
             {
-              "label": "⚙️ Quản Lý Ẩn",
-              "emoji": "⚙️",
-              "style": "primary",
-              "action": {
-                "type": "panel",
-                "value": "mgr"
-              }
-            },
-            {
-              "label": "➕ Tạo Máy Mới",
+              "label": "Tạo Máy Mới",
               "emoji": "➕",
               "style": "success",
               "action": {
-                "type": "panel",
-                "value": "create"
+                "type": "modal",
+                "value": "modal_create"
               }
             },
             {
-              "label": "🔄 Quét & Nâng Cấp YML",
-              "emoji": "🔄",
-              "style": "secondary",
-              "action": {
-                "type": "cmd",
-                "value": "may_scan"
-              }
-            }
-          ],
-          [
-            {
-              "label": "🔄 Làm Mới",
+              "label": "Làm Mới",
               "emoji": "🔄",
               "style": "secondary",
               "action": {
@@ -1677,7 +1657,7 @@
               }
             },
             {
-              "label": "👁️ Hiện/Ẩn PIN",
+              "label": "Hiện/Ẩn PIN",
               "emoji": "👁️",
               "style": "secondary",
               "action": {
@@ -1686,12 +1666,124 @@
               }
             },
             {
-              "label": "🌐 Web Tu Tiên UI",
+              "label": "Web Quản Lý",
               "emoji": "🌐",
               "style": "link",
               "action": {
                 "type": "link",
                 "value": "http://datdemo.duckdns.org:3000/rdp-manager"
+              }
+            }
+          ]
+        ]
+      },
+      {
+        "id": "vm_detail",
+        "name": "Bảng Điều Khiển Chi Tiết Máy (Image.png)",
+        "ownerOnly": true,
+        "content": "",
+        "embed": {
+          "enabled": true,
+          "color": "#1e1e2e",
+          "title": "Máy {curDisplayName}",
+          "description": "**ID Định Danh:** `{curMachineId}`\n**GameViewer ID:** **{curGvId}**\n**Mã PIN:** `{curDisplayPin}`\n**StarDesk ID:** `{curStardeskId}`\n**Thời gian:** **{curRemain}**\n**Chủ sở hữu:** {curOwner}",
+          "url": "",
+          "thumbnail": "",
+          "image": "",
+          "author": {
+            "name": "Máy {curDisplayName} • {curStatusBadge}",
+            "icon": ""
+          },
+          "footer": {
+            "text": "NetEase GameViewer & StarDesk • Chế độ điều khiển trực tiếp",
+            "icon": ""
+          },
+          "timestamp": false,
+          "fields": []
+        },
+        "rows": [
+          [
+            {
+              "label": "Chạy",
+              "emoji": "▶",
+              "style": "success",
+              "action": {
+                "type": "vm",
+                "value": "start"
+              }
+            },
+            {
+              "label": "Khởi động",
+              "emoji": "🔄",
+              "style": "primary",
+              "action": {
+                "type": "vm",
+                "value": "restart"
+              }
+            },
+            {
+              "label": "Tắt",
+              "emoji": "🛑",
+              "style": "danger",
+              "action": {
+                "type": "vm",
+                "value": "stop"
+              }
+            },
+            {
+              "label": "Prompt",
+              "emoji": "📝",
+              "style": "secondary",
+              "action": {
+                "type": "prompt",
+                "value": "prompt:show"
+              }
+            },
+            {
+              "label": "",
+              "emoji": "🗑",
+              "style": "danger",
+              "action": {
+                "type": "vm",
+                "value": "delete"
+              }
+            }
+          ],
+          [
+            {
+              "label": "Danh Sách Máy",
+              "emoji": "🔙",
+              "style": "secondary",
+              "action": {
+                "type": "menu",
+                "value": "main"
+              }
+            },
+            {
+              "label": "5 Giờ",
+              "emoji": "⏱️",
+              "style": "secondary",
+              "action": {
+                "type": "set_dur",
+                "value": "5h00m"
+              }
+            },
+            {
+              "label": "PIN Aistv2026",
+              "emoji": "🔑",
+              "style": "secondary",
+              "action": {
+                "type": "set_pin",
+                "value": "Aistv2026"
+              }
+            },
+            {
+              "label": "Hiện/Ẩn PIN",
+              "emoji": "🙈",
+              "style": "secondary",
+              "action": {
+                "type": "toggle_pin",
+                "value": "toggle"
               }
             }
           ]
@@ -1882,6 +1974,10 @@
       "runnerRepo": "ohohhoho82-alt/app",
       "token": "",
       "rootAdmin": "946662197168341053",
+      "allowedUsers": [
+        "946662197168341053"
+      ],
+      "allowedRoles": [],
       "duckdnsDomain": "datdemo.duckdns.org"
     },
     "machines": {}

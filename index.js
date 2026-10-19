@@ -854,7 +854,10 @@ async function runUi(sid, ev) {
 client.on(Events.InteractionCreate, async i => {
   try {
     if (i.isButton() && String(i.customId).startsWith('tt:')) return await tutien.onButton(i);   // nút của menu Tu Tiên
-    if (rdp && typeof rdp.onButton === 'function' && i.isButton() && String(i.customId).startsWith('rdp:')) return await rdp.onButton(i);     // nút của menu RDP
+    if (rdp && String(i.customId).startsWith('rdp:')) {
+      if (typeof rdp.onInteraction === 'function') return await rdp.onInteraction(i);
+      if (i.isButton() && typeof rdp.onButton === 'function') return await rdp.onButton(i);
+    }
     if (!i.isButton() || !String(i.customId).startsWith('sx:')) return;
     const [, sid, kind, ...rest] = i.customId.split(':'), data = rest.join(':');
     const s = db.scripts.find(x => x.id === sid);

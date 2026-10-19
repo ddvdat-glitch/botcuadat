@@ -81,15 +81,17 @@ const https = require('https');
           
 // HOISTED HELPERS
 function getRdpConfig() {
-                    const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
-                    const r = d.rdp || (d.shared && d.shared.rdp) || d;
-                    const cfg = r.config || {};
-                    const storageRepo = cfg.storageRepo || process.env.STORAGE_REPO || 'ddvdat-glitch/rdp';
-                    const runnerRepo = cfg.runnerRepo || process.env.RUNNER_REPO || 'ohohhoho82-alt/app';
-                    const token = cfg.token || process.env.GITHUB_TOKEN || process.env.PAT_TOKEN || process.env.RDP_GH_TOKEN || process.env.STORAGE_GH_TOKEN || process.env.GH_TOKEN || '';
-                    const rootAdmin = cfg.rootAdmin || '946662197168341053';
-                    return { storageRepo, runnerRepo, token, rootAdmin, ...cfg };
-                  }
+  const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+  const r = d.rdp || (d.shared && d.shared.rdp) || d;
+  const cfg = r.config || {};
+  const storageRepo = cfg.storageRepo || process.env.STORAGE_REPO || 'ddvdat-glitch/rdp';
+  const runnerRepo = cfg.runnerRepo || process.env.RUNNER_REPO || 'ohohhoho82-alt/app';
+  const token = cfg.token || process.env.GITHUB_TOKEN || process.env.PAT_TOKEN || process.env.RDP_GH_TOKEN || process.env.STORAGE_GH_TOKEN || process.env.GH_TOKEN || '';
+  const rootAdmin = cfg.rootAdmin || '946662197168341053';
+  const allowedUsers = Array.isArray(cfg.allowedUsers) ? cfg.allowedUsers : ['946662197168341053'];
+  const allowedRoles = Array.isArray(cfg.allowedRoles) ? cfg.allowedRoles : [];
+  return { storageRepo, runnerRepo, token, rootAdmin, allowedUsers, allowedRoles, ...cfg };
+}
 
                   function ghRequest(method, repo, endpoint, body, customToken) {
                     return new Promise((resolve, reject) => {
@@ -1569,6 +1571,21 @@ function init(ctx) {
   if (ctx && typeof ctx.log === 'function') {
     ctx.log('system', 'RDP Bridge & Bot Controller initialized');
   }
+
+  // Lắng nghe tương tác an toàn (bắt các sự kiện ModalSubmit và SelectMenu)
+  if (ctx && ctx.client) {
+    ctx.client.on('interactionCreate', async i => {
+      try {
+        if (!i.customId || !String(i.customId).startsWith('rdp:')) return;
+        if (i.isModalSubmit() || i.isStringSelectMenu() || (i.isButton() && i.customId.startsWith('rdp:select_vm:'))) {
+          return await onInteraction(i);
+        }
+      } catch (err) {
+        if (botCtx && typeof botCtx.log === 'function') botCtx.log('error', 'rdp interaction listener: ' + err.message);
+      }
+    });
+  }
+
   // Tự động quét và đồng bộ kho máy ảo khi khởi động
   setTimeout(() => {
     syncAllMachinesWithGithub().catch(() => {});
@@ -1617,9 +1634,22 @@ function isRootAdmin(uid, rootAdmin) {
   return uid === ra;
 }
 
+function isUserAllowed(uid, member, cfg) {
+  const ra = cfg?.rootAdmin || '946662197168341053';
+  if (uid === ra) return true;
+  const allowed = Array.isArray(cfg?.allowedUsers) ? cfg.allowedUsers : ['946662197168341053'];
+  if (allowed.includes(uid)) return true;
+  if (cfg?.allowedRoles && cfg.allowedRoles.length && member?.roles?.cache) {
+    if (cfg.allowedRoles.some(r => member.roles.cache.has(r))) return true;
+  }
+  return false;
+}
+
 function checkRdpAccess(cmd, msg, rootAdmin) {
   const uid = msg.author.id;
-  if (isRootAdmin(uid, rootAdmin)) return true;
+  const cfg = getRdpConfig();
+  if (isRootAdmin(uid, rootAdmin || cfg.rootAdmin)) return true;
+  if (!isUserAllowed(uid, msg.member, cfg)) return false;
   const access = cmd.access || {};
   if (access.mode === 'staff') {
     const isOwner = msg.guild && msg.guild.ownerId === uid;
@@ -1649,12 +1679,11 @@ function getRdpVars(uid, extraVars = {}) {
   let myMachineKeys = Object.keys(allMachines).filter(k => {
     const m = allMachines[k];
     if (isRoot || uid === 'any') return true;
-    if (!m.ownerId || m.ownerId === 'all' || m.ownerId === 'public') return true;
     return m.ownerId === uid;
   });
 
-  // Nếu người dùng chưa gán máy riêng, hiển thị toàn bộ máy công khai trong hệ thống để không bị trống
-  if (myMachineKeys.length === 0 && Object.keys(allMachines).length > 0) {
+  // Đối với Root Admin nếu chưa có máy nào gán riêng thì hiển thị toàn bộ máy server
+  if (isRoot && myMachineKeys.length === 0 && Object.keys(allMachines).length > 0) {
     myMachineKeys = Object.keys(allMachines);
   }
 
@@ -1673,7 +1702,7 @@ function getRdpVars(uid, extraVars = {}) {
     cards.push(`• ${icon} **${(m.displayName || m.name || k).toUpperCase()}** │ 🆔 ID: ${idText} │ 🔑 PIN: ${pinText} │ ⏰ ${durText}`);
   }
 
-  const curKey = (rdp.selectedVm && rdp.selectedVm[uid]) || myMachineKeys[0] || '';
+  const curKey = (rdp.selectedVm && rdp.selectedVm[uid]) || myMachineKeys[0] || (isRoot ? Object.keys(allMachines)[0] : '') || '';
   const curM = allMachines[curKey] || {};
 
   const vars = {
@@ -1682,21 +1711,21 @@ function getRdpVars(uid, extraVars = {}) {
     totalCount: myMachineKeys.length,
     runnerRepo: cfg.runnerRepo,
     storageRepo: cfg.storageRepo,
-    machineList: cards.length ? cards.join('\n') : '*(Bạn chưa có máy nào. Bấm ➕ Tạo Máy Mới để bắt đầu!)*',
+    machineList: cards.length ? cards.join('\n') : '*(Bạn chưa sở hữu máy ảo nào. Hãy bấm ➕ Tạo Máy Mới để bắt đầu!)*',
     pinMode: rdp.pinMasked !== false ? '🙈 Đang ẩn (An toàn)' : '👁️ Đang hiện (Công khai)',
     user: uid && uid !== 'any' ? `<@${uid}>` : 'Người dùng',
     webUrl: `http://${process.env.DUCKDNS_DOMAIN || cfg.duckdnsDomain || 'datdemo.duckdns.org'}:${process.env.PORT || '3000'}/rdp-manager`,
     curMachineId: curM.name || curKey || 'none',
-    curDisplayName: curM.displayName || curM.name || curKey || 'Chưa chọn máy',
-    curStatusBadge: curM.isOnline ? '🟢 Online (Sẵn sàng kết nối)' : (curM.status === 'in_progress' ? '⏳ Đang khởi động...' : '🔴 Đã tắt'),
-    curGvId: curM.gvId || '(Chờ mở máy / Đang cấp)',
+    curDisplayName: (curM.displayName || curM.name || curKey || 'Chưa chọn máy').toUpperCase(),
+    curStatusBadge: curM.isOnline ? '🟢 Online' : (curM.status === 'in_progress' ? '⏳ Đang khởi động' : '🔴 Offline'),
+    curGvId: curM.gvId || '(Chờ cấp ID)',
     curDisplayPin: rdp.pinMasked !== false ? '••••••••' : (curM.gvPin || 'Aistv2026'),
-    curStardeskId: curM.stardeskId || '(Chờ đăng ký)',
+    curStardeskId: curM.stardeskId || '-',
     curUser: 'runneradmin',
     curPass: curM.pass || curM.gvPin || 'Aistv@2026',
-    curRemain: curM.remainSec != null ? hms(curM.remainSec) : (curM.duration || '5h'),
-    curOwner: curM.ownerId ? `<@${curM.ownerId}>` : 'Admin',
-    curAutoPrompt: curM.autoPrompt || `[MÁY: ${(curM.displayName || curM.name || curKey).toUpperCase()}] Trạng thái: ${curM.isOnline ? '🟢 Online' : '🔴 Offline'} | ID: ${curM.gvId || 'Chưa có'} | PIN: ${curM.gvPin || 'Aistv2026'}`,
+    curRemain: curM.remainSec != null ? hms(curM.remainSec) : (curM.duration || '5h00m'),
+    curOwner: curM.ownerId ? `<@${curM.ownerId}>` : (curM.owner || 'Chưa gán'),
+    curAutoPrompt: curM.autoPrompt || `[MÁY: ${(curM.displayName || curM.name || curKey).toUpperCase()}] Trạng thái: ${curM.isOnline ? '🟢 Online' : '🔴 Offline'} | GameViewer ID: ${curM.gvId || 'Chưa có'} | PIN: ${curM.gvPin || 'Aistv2026'} | StarDesk: ${curM.stardeskId || '-'}`,
     ...extraVars
   };
   return vars;
@@ -1794,6 +1823,59 @@ function buildRdpPayload(menu, vars, uid) {
   };
 
   const rows = [];
+
+  // NẾU LÀ MENU CHÍNH 'main': TỰ ĐỘNG CHÈN NÚT VÀ SELECT MENU CHO CÁC MÁY SỞ HỮU CỦA USER
+  if (menu.id === 'main') {
+    const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+    const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+    const cfg = getRdpConfig();
+    const isRoot = isRootAdmin(uid, cfg.rootAdmin);
+    const allMachines = rdp.machines || {};
+    let myKeys = Object.keys(allMachines).filter(k => {
+      if (isRoot || uid === 'any') return true;
+      return allMachines[k].ownerId === uid;
+    });
+    if (isRoot && myKeys.length === 0 && Object.keys(allMachines).length > 0) {
+      myKeys = Object.keys(allMachines);
+    }
+
+    if (myKeys.length > 0) {
+      const btnRow = [];
+      const topKeys = myKeys.slice(0, 5);
+      for (const k of topKeys) {
+        const m = allMachines[k] || {};
+        const isOnline = m.isOnline || m.status === 'in_progress';
+        const icon = isOnline ? '🟢' : (m.status === 'in_progress' ? '⏳' : '🔴');
+        const dName = (m.displayName || m.name || k).toUpperCase().slice(0, 20);
+        const bb = new D.ButtonBuilder()
+          .setCustomId(`rdp:select_vm:${k}:${uid}`.slice(0, 100))
+          .setLabel(dName)
+          .setEmoji(icon)
+          .setStyle(isOnline ? D.ButtonStyle.Success : D.ButtonStyle.Secondary);
+        btnRow.push(bb);
+      }
+      if (btnRow.length) rows.push(new D.ActionRowBuilder().addComponents(btnRow));
+
+      if (myKeys.length > 5) {
+        const selectMenu = new D.StringSelectMenuBuilder()
+          .setCustomId(`rdp:select_vm_menu:${uid}`.slice(0, 100))
+          .setPlaceholder('🖥️ Chọn máy ảo để xem chi tiết & điều khiển...');
+        const opts = myKeys.slice(0, 25).map(k => {
+          const m = allMachines[k] || {};
+          const isOnline = m.isOnline || m.status === 'in_progress';
+          return {
+            label: (m.displayName || m.name || k).toUpperCase().slice(0, 50),
+            value: k,
+            description: `GV: ${m.gvId || 'Chờ cấp ID'} | PIN: ${rdp.pinMasked !== false ? '••••••••' : (m.gvPin || 'Aistv2026')} | ${isOnline ? 'Online' : 'Offline'}`.slice(0, 100),
+            emoji: isOnline ? '🟢' : '🔴'
+          };
+        });
+        selectMenu.addOptions(opts);
+        rows.push(new D.ActionRowBuilder().addComponents(selectMenu));
+      }
+    }
+  }
+
   (menu.rows || []).forEach((row, ri) => {
     const comps = [];
     row.forEach((b, ci) => {
@@ -2080,6 +2162,92 @@ async function onMessage(msg) {
   const text = (msg.content || '').trim();
   if (!text) return false;
 
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+  const uid = msg.author.id;
+  const cfg = getRdpConfig();
+
+  // 1. CÁC LỆNH PHÂN QUYỀN HỆ THỐNG DO ADMIN TỐI CAO 946662197168341053 ĐIỀU HÀNH
+  if (lower.startsWith('!may capquyen') || lower.startsWith('!may grant')) {
+    if (!isRootAdmin(uid, cfg.rootAdmin)) {
+      await msg.reply('🚫 Chỉ có Admin Tối Cao (`946662197168341053`) mới có quyền cấp quyền sử dụng hệ thống máy ảo!').catch(() => {});
+      return true;
+    }
+    const match = text.match(/<@!?(\d+)>|(\d{17,20})/);
+    const targetUid = match ? (match[1] || match[2]) : null;
+    if (!targetUid) {
+      await msg.reply('⚠️ Vui lòng tag người dùng hoặc nhập Discord ID, ví dụ: `!may capquyen @user` hoặc `!may capquyen 123456789012345678`').catch(() => {});
+      return true;
+    }
+    rdp.config = rdp.config || {};
+    rdp.config.allowedUsers = Array.isArray(rdp.config.allowedUsers) ? rdp.config.allowedUsers : ['946662197168341053'];
+    if (!rdp.config.allowedUsers.includes(targetUid)) {
+      rdp.config.allowedUsers.push(targetUid);
+    }
+    saveBridgeState(rdp);
+    if (botCtx && typeof botCtx.saveNow === 'function') botCtx.saveNow();
+    await msg.reply(`✅ **ĐÃ CẤP QUYỀN THÀNH CÔNG!**\n• Người dùng: <@${targetUid}> (\`${targetUid}\`)\n• Hiện tại đã có thể sử dụng các lệnh \`!may\` và điều khiển máy ảo.`).catch(() => {});
+    return true;
+  }
+
+  if (lower.startsWith('!may thuhoi') || lower.startsWith('!may revoke')) {
+    if (!isRootAdmin(uid, cfg.rootAdmin)) {
+      await msg.reply('🚫 Chỉ có Admin Tối Cao (`946662197168341053`) mới có quyền thu hồi quyền sử dụng máy ảo!').catch(() => {});
+      return true;
+    }
+    const match = text.match(/<@!?(\d+)>|(\d{17,20})/);
+    const targetUid = match ? (match[1] || match[2]) : null;
+    if (!targetUid) {
+      await msg.reply('⚠️ Vui lòng tag người dùng hoặc nhập Discord ID, ví dụ: `!may thuhoi @user`').catch(() => {});
+      return true;
+    }
+    if (targetUid === cfg.rootAdmin || targetUid === '946662197168341053') {
+      await msg.reply('❌ Không thể thu hồi quyền của Admin Tối Cao!').catch(() => {});
+      return true;
+    }
+    rdp.config = rdp.config || {};
+    rdp.config.allowedUsers = (Array.isArray(rdp.config.allowedUsers) ? rdp.config.allowedUsers : ['946662197168341053']).filter(u => u !== targetUid);
+    saveBridgeState(rdp);
+    if (botCtx && typeof botCtx.saveNow === 'function') botCtx.saveNow();
+    await msg.reply(`🗑️ **ĐÃ THU HỒI QUYỀN!**\n• Người dùng <@${targetUid}> (\`${targetUid}\`) đã bị ngắt quyền sử dụng hệ thống máy ảo.`).catch(() => {});
+    return true;
+  }
+
+  if (lower.startsWith('!may dsquyen') || lower.startsWith('!may listquyen')) {
+    if (!isUserAllowed(uid, msg.member, cfg)) {
+      await msg.reply(`⛔ Bạn chưa được cấp quyền sử dụng hệ thống máy ảo! Hãy liên hệ Admin tối cao (<@${cfg.rootAdmin}>).`).catch(() => {});
+      return true;
+    }
+    const allowed = Array.isArray(cfg.allowedUsers) ? cfg.allowedUsers : ['946662197168341053'];
+    const roles = Array.isArray(cfg.allowedRoles) ? cfg.allowedRoles : [];
+    const userLines = allowed.map((u, idx) => `  ${idx + 1}. <@${u}> (\`${u}\`)${u === cfg.rootAdmin ? ' 👑 *(Root Admin)*' : ''}`).join('\n');
+    const roleLines = roles.length ? roles.map((r, idx) => `  ${idx + 1}. <@&${r}> (\`${r}\`)`).join('\n') : '  *(Không có role nào)*';
+
+    const rep = [
+      '🛡️ **DANH SÁCH QUYỀN SỬ DỤNG HỆ THỐNG MÁY ẢO**',
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      '👑 **Admin Tối Cao:** <@' + cfg.rootAdmin + '>',
+      '',
+      '👤 **Danh Sách Người Dùng Được Phép:**',
+      userLines || '  *(Chưa có user nào)*',
+      '',
+      '🏷️ **Vai Trò Được Phép:**',
+      roleLines,
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      '💡 *Dùng `!may capquyen @user` hoặc `!may thuhoi @user` để quản trị!*'
+    ].join('\n');
+    await msg.reply(rep).catch(() => {});
+    return true;
+  }
+
+  // 2. KIỂM TRA PHÂN QUYỀN TRUY CẬP TỔNG THỂ CHO MỌI LỆNH !may / !ds / !rdp
+  if (/^!(may|maymenu|ds|rdp)\b/i.test(text) || text.toLowerCase() === '!ds') {
+    if (!isUserAllowed(uid, msg.member, cfg)) {
+      await msg.reply(`⛔ **BẠN CHƯA ĐƯỢC CẤP QUYỀN SỬ DỤNG HỆ THỐNG MÁY ẢO!**\n• Vui lòng liên hệ Admin tối cao (<@${cfg.rootAdmin}>) để được cấp phép sử dụng.`).catch(() => {});
+      return true;
+    }
+  }
+
   for (const cmd of rdp.commands) {
     if (cmd.enabled === false || !cmd.trigger) continue;
     let isMatch = false;
@@ -2231,6 +2399,152 @@ async function onMessage(msg) {
   return false;
 }
 
+// ----------------- HIỂN THỊ MODAL TẠO MÁY ẢO -----------------
+async function showCreateMachineModal(i, uid) {
+  const D = require('discord.js');
+  const modal = new D.ModalBuilder()
+    .setCustomId(`rdp:modal_create_submit:${uid}`)
+    .setTitle('➕ TẠO MÁY ẢO GAMEVIEWER & STARDESK');
+
+  const autoDefaultName = `may-${Date.now().toString(36).slice(-4)}`;
+
+  const nameInput = new D.TextInputBuilder()
+    .setCustomId('vm_name')
+    .setLabel('Tên Định Danh Máy (Machine ID / Tên gợi nhớ)')
+    .setStyle(D.TextInputStyle.Short)
+    .setPlaceholder(`Ví dụ: ${autoDefaultName}, may-game, vm1...`)
+    .setValue(autoDefaultName)
+    .setRequired(true)
+    .setMaxLength(32);
+
+  const pinInput = new D.TextInputBuilder()
+    .setCustomId('vm_pin')
+    .setLabel('Mã PIN GameViewer (8-16 ký tự chữ & số)')
+    .setStyle(D.TextInputStyle.Short)
+    .setPlaceholder('Mặc định: Aistv2026')
+    .setValue('Aistv2026')
+    .setRequired(true)
+    .setMinLength(8)
+    .setMaxLength(16);
+
+  const durInput = new D.TextInputBuilder()
+    .setCustomId('vm_dur')
+    .setLabel('Thời Lượng Treo (5h, 3h, 1h, 6h...)')
+    .setStyle(D.TextInputStyle.Short)
+    .setPlaceholder('5h')
+    .setValue('5h')
+    .setRequired(false)
+    .setMaxLength(10);
+
+  modal.addComponents(
+    new D.ActionRowBuilder().addComponents(nameInput),
+    new D.ActionRowBuilder().addComponents(pinInput),
+    new D.ActionRowBuilder().addComponents(durInput)
+  );
+
+  await i.showModal(modal);
+}
+
+// ----------------- XỬ LÝ SUBMIT MODAL TẠO MÁY ẢO -----------------
+async function handleModalCreateSubmit(i, uid) {
+  const D = require('discord.js');
+  await i.deferReply({ flags: D.MessageFlags.Ephemeral });
+
+  const rawName = i.fields.getTextInputValue('vm_name');
+  const rawPin = i.fields.getTextInputValue('vm_pin');
+  const rawDur = i.fields.getTextInputValue('vm_dur') || '5h';
+
+  const cleanName = String(rawName || '').toLowerCase().replace(/[^a-z0-9\-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || `may-${Date.now().toString(36).slice(-4)}`;
+  const cleanPin = (rawPin || 'Aistv2026').replace(/[^A-Za-z0-9]/g, '') || 'Aistv2026';
+  const cleanDur = rawDur.includes('h') ? rawDur : `${rawDur}h`;
+
+  const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+  const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+  const cfg = getRdpConfig();
+
+  try {
+    await i.editReply({ content: `⏳ Đang khởi tạo máy **${cleanName.toUpperCase()}** (${cleanDur}) với PIN \`${cleanPin}\` trên GitHub Actions...` });
+    await createMachineWorkflow(cleanName, cleanDur, cleanPin, uid, i.member?.displayName || i.user.username);
+
+    rdp.selectedVm = rdp.selectedVm || {};
+    rdp.selectedVm[uid] = cleanName;
+    saveBridgeState(rdp);
+
+    const detailMenu = (rdp.menus || []).find(m => m.id === 'vm_detail') || (rdp.menus || [])[0];
+    const vars = getRdpVars(uid, { curMachineId: cleanName });
+    const payload = buildRdpPayload(detailMenu, vars, uid);
+
+    await i.editReply({
+      content: `🎉 **ĐÃ TẠO MÁY ẢO THÀNH CÔNG!**\n• Máy: **${cleanName.toUpperCase()}**\n• PIN: \`${cleanPin}\`\n• Đang kích hoạt tiến trình trên GitHub Actions!`,
+      ...payload
+    });
+  } catch (err) {
+    await i.editReply({ content: `❌ Lỗi khởi tạo máy ảo **${cleanName}**: ${err.message}` });
+  }
+}
+
+// ----------------- TỔNG HỢP XỬ LÝ TƯƠNG TÁC (BUTTON / MODAL / SELECT MENU) -----------------
+async function onInteraction(i) {
+  const D = require('discord.js');
+  if (!i.customId || !String(i.customId).startsWith('rdp:')) return;
+
+  const uid = i.user.id;
+  const cfg = getRdpConfig();
+
+  // Kiểm tra phân quyền truy cập: Chỉ user được Admin 946662197168341053 cấp phép mới được tương tác
+  if (!isUserAllowed(uid, i.member, cfg)) {
+    if (i.isRepliable()) {
+      return await i.reply({
+        content: `⛔ **BẠN CHƯA ĐƯỢC CẤP QUYỀN SỬ DỤNG HỆ THỐNG MÁY ẢO!**\n• Vui lòng liên hệ Admin tối cao (<@${cfg.rootAdmin}>) để được cấp phép sử dụng.`,
+        flags: D.MessageFlags.Ephemeral
+      }).catch(() => {});
+    }
+    return;
+  }
+
+  // 1. Xử lý gửi Modal tạo máy
+  if (i.isModalSubmit() && i.customId.startsWith('rdp:modal_create_submit:')) {
+    return await handleModalCreateSubmit(i, uid);
+  }
+
+  // 2. Xử lý bấm trực tiếp vào nút máy: rdp:select_vm:<k>:<uid>
+  if (i.isButton() && i.customId.startsWith('rdp:select_vm:')) {
+    const [, , vmName] = i.customId.split(':');
+    const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+    const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+    rdp.selectedVm = rdp.selectedVm || {};
+    rdp.selectedVm[uid] = vmName;
+    saveBridgeState(rdp);
+
+    await i.deferUpdate();
+    const detailMenu = (rdp.menus || []).find(m => m.id === 'vm_detail') || (rdp.menus || [])[0];
+    const vars = getRdpVars(uid, { curMachineId: vmName });
+    const payload = buildRdpPayload(detailMenu, vars, uid);
+    return await i.editReply(payload);
+  }
+
+  // 3. Xử lý chọn máy từ StringSelectMenu: rdp:select_vm_menu:<uid>
+  if (i.isStringSelectMenu() && i.customId.startsWith('rdp:select_vm_menu:')) {
+    const vmName = i.values[0];
+    const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+    const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+    rdp.selectedVm = rdp.selectedVm || {};
+    rdp.selectedVm[uid] = vmName;
+    saveBridgeState(rdp);
+
+    await i.deferUpdate();
+    const detailMenu = (rdp.menus || []).find(m => m.id === 'vm_detail') || (rdp.menus || [])[0];
+    const vars = getRdpVars(uid, { curMachineId: vmName });
+    const payload = buildRdpPayload(detailMenu, vars, uid);
+    return await i.editReply(payload);
+  }
+
+  // 4. Các nút bấm thông thường: chuyển tiếp tới onButton
+  if (i.isButton()) {
+    return await onButton(i);
+  }
+}
+
 // ----------------- XỬ LÝ SỰ KIỆN NÚT BẤM (rdp:...) -----------------
 async function onButton(i) {
   const D = require('discord.js');
@@ -2251,6 +2565,10 @@ async function onButton(i) {
   const cfg = getRdpConfig();
   const isRoot = isRootAdmin(uid, cfg.rootAdmin);
 
+  if (!isUserAllowed(uid, i.member, cfg)) {
+    return i.reply({ content: `⛔ Bạn chưa được cấp quyền sử dụng hệ thống máy ảo! Hãy liên hệ Admin tối cao (<@${cfg.rootAdmin}>).`, flags: D.MessageFlags.Ephemeral });
+  }
+
   if (menu.ownerOnly !== false && owner !== 'any' && owner !== uid && !isRoot) {
     return i.reply({ content: '🚫 Đây là menu cá nhân của người khác. Hãy gõ `!may` để mở menu của bạn!', flags: D.MessageFlags.Ephemeral });
   }
@@ -2258,6 +2576,11 @@ async function onButton(i) {
   const actions = (Array.isArray(btn.actions) && btn.actions.length > 0)
     ? btn.actions
     : (btn.action ? [btn.action] : []);
+
+  // NẾU LÀ NÚT TẠO MÁY BẰNG MODAL: HIỂN THỊ BẢNG ẨN TRỰC TIẾP TRƯỚC KHI DEFER!
+  if (actions.some(a => a.type === 'modal' || a.value === 'modal_create')) {
+    return await showCreateMachineModal(i, uid);
+  }
 
   const isEphemeralTrigger = (btn.ephemeral === true || actions.some(a => a.type === 'panel' || a.value === 'mgr' || a.value === 'create'));
 
@@ -2442,11 +2765,41 @@ async function onButton(i) {
                 if (botCtx && typeof botCtx.log === 'function') botCtx.log('warn', `Delete workflow ${curKey}.yml: ${e.message}`);
               }
               delete rdp.machines[curKey];
+              if (rdp.selectedVm && rdp.selectedVm[uid] === curKey) {
+                delete rdp.selectedVm[uid];
+              }
               if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
               saveBridgeState(rdp);
+              activeMenu = rdp.menus.find(m => m.id === 'main') || activeMenu;
+              await i.followUp({ content: `🗑️ Đã xóa máy ảo **${(curM?.displayName || curKey).toUpperCase()}** thành công!`, flags: D.MessageFlags.Ephemeral }).catch(() => {});
+            } else {
+              await i.followUp({ content: `🚫 Bạn không có quyền xóa máy ảo này vì không phải chủ sở hữu!`, flags: D.MessageFlags.Ephemeral }).catch(() => {});
             }
           }
         }
+      }
+
+      if (actType === 'prompt') {
+        const curKey = (rdp.selectedVm && rdp.selectedVm[uid]) || Object.keys(rdp.machines || {})[0];
+        const curM = (rdp.machines && rdp.machines[curKey]) || {};
+        const promptText = [
+          `🖥️ **THÔNG TIN KẾT NỐI & PROMPT CHO MÁY [${(curM.displayName || curM.name || curKey || 'Chưa chọn').toUpperCase()}]**`,
+          '```yaml',
+          `Tên máy: ${curM.displayName || curM.name || curKey || 'Chưa có'}`,
+          `Trạng thái: ${curM.isOnline ? 'ONLINE' : 'OFFLINE'}`,
+          `GameViewer ID: ${curM.gvId || 'Chờ cấp ID'}`,
+          `Mã PIN: ${curM.gvPin || 'Aistv2026'}`,
+          `StarDesk ID: ${curM.stardeskId || '-'}`,
+          `User hệ thống: runneradmin`,
+          `Mật khẩu máy: ${curM.pass || curM.gvPin || 'Aistv@2026'}`,
+          `Thời lượng: ${curM.duration || '5h'}`,
+          `Chủ sở hữu: ${curM.owner || curM.ownerId || uid}`,
+          `Runner Repo: ${cfg.runnerRepo}`,
+          `Storage Repo: ${cfg.storageRepo}`,
+          '```',
+          `💡 *Bạn có thể copy đoạn trên để dán vào GameViewer / StarDesk hoặc gửi cho trợ lý AI!*`
+        ].join('\n');
+        await i.followUp({ content: promptText, flags: D.MessageFlags.Ephemeral }).catch(() => {});
       }
 
       if (actType === 'cmd') {
@@ -2475,6 +2828,9 @@ module.exports = {
   init,
   onMessage,
   onButton,
+  onInteraction,
+  showCreateMachineModal,
+  handleModalCreateSubmit,
   loadBridgeState,
   saveBridgeState,
   getRdpConfig,

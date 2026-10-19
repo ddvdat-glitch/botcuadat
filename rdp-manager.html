@@ -283,12 +283,19 @@ function tMenus(){
     <button class="d sm" onclick="rmMenu()">🗑</button>
   </p><hr style="border-color:var(--bd)">
   <div class="mu">THÊM KHỐI</div><p class="r"><button class="s sm" onclick="addField()">＋ Trường</button><button class="s sm" onclick="addBtn(-1)">＋ Nút</button><button class="s sm" onclick="addRow()">＋ Hàng nút</button></p>
+  <div class="mu" style="margin-top:10px">⭐ NẠP MẪU GIAO DIỆN CHUẨN</div>
+  <div style="display:flex;flex-direction:column;gap:5px;margin-top:4px">
+    <button class="g sm" style="text-align:left;padding:5px 8px" onclick="loadPresetCardTemplate()">📋 Nạp Mẫu: Thẻ Máy Chi Tiết (Image.png)</button>
+    <button class="s sm" style="text-align:left;padding:5px 8px" onclick="loadPresetMainTemplate()">📋 Nạp Mẫu: Danh Sách Máy Sở Hữu (Menu 1)</button>
+  </div>
   <div class="mu" style="margin-top:10px">🔘 NÚT MẪU 1-CLICK (PRESETS)</div>
   <div class="preset-grid">
     <button class="s sm" onclick="addPresetBtn({label:'🚀 Bắt Đầu / Quản Lý',emoji:'🚀',style:'primary',action:{type:'panel',value:'mgr'}})">🚀 Quản Lý</button>
     <button class="g sm" onclick="addPresetBtn({label:'▶️ Chạy Máy',emoji:'▶️',style:'success',action:{type:'vm',value:'start'}})">▶️ Chạy VM</button>
     <button class="s sm" onclick="addPresetBtn({label:'🔄 Khởi Động',emoji:'🔄',style:'primary',action:{type:'vm',value:'restart'}})">🔄 Khởi Động</button>
     <button class="d sm" onclick="addPresetBtn({label:'🛑 Tắt Máy',emoji:'🛑',style:'danger',action:{type:'vm',value:'stop'}})">🛑 Tắt Máy</button>
+    <button class="s sm" onclick="addPresetBtn({label:'📝 Prompt',emoji:'📝',style:'secondary',action:{type:'prompt',value:'prompt:show'}})">📝 Prompt</button>
+    <button class="g sm" onclick="addPresetBtn({label:'➕ Tạo Mới (Modal)',emoji:'➕',style:'success',action:{type:'modal',value:'modal_create'}})">➕ Tạo (Modal)</button>
     <button class="s sm" onclick="addPresetBtn({label:'⏱️ 5 Giờ',emoji:'⏱️',style:'secondary',action:{type:'set_dur',value:'5h00m'}})">⏱️ 5 Giờ</button>
     <button class="s sm" onclick="addPresetBtn({label:'⏱️ 3 Giờ',emoji:'⏱️',style:'secondary',action:{type:'set_dur',value:'3h00m'}})">⏱️ 3 Giờ</button>
     <button class="s sm" onclick="addPresetBtn({label:'🔑 PIN Chuẩn',emoji:'🔑',style:'secondary',action:{type:'set_pin',value:'Aistv2026'}})">🔑 PIN Chuẩn</button>
@@ -296,7 +303,6 @@ function tMenus(){
     <button class="s sm" onclick="addPresetBtn({label:'🙈 Ẩn PIN',emoji:'🙈',style:'secondary',action:{type:'toggle_pin',value:''}})">🙈 Ẩn PIN</button>
     <button class="s sm" onclick="addPresetBtn({label:'◀️ Trước',emoji:'◀️',style:'secondary',action:{type:'nav',value:'prev'}})">◀️ Trước</button>
     <button class="s sm" onclick="addPresetBtn({label:'Sau ▶️',emoji:'▶️',style:'secondary',action:{type:'nav',value:'next'}})">Sau ▶️</button>
-    <button class="g sm" onclick="addPresetBtn({label:'➕ Tạo Mới',emoji:'➕',style:'success',action:{type:'panel',value:'create'}})">➕ Tạo Mới</button>
     <button class="s sm" onclick="addPresetBtn({label:'🔄 Làm Mới',emoji:'🔄',style:'secondary',action:{type:'refresh',value:''}})">🔄 Làm Mới</button>
     <button class="s sm" onclick="addPresetBtn({label:'🌐 Web Quản Lý',emoji:'🌐',style:'link',action:{type:'link',value:'http://127.0.0.1:8080'}})">🌐 Web RDP</button>
     <button class="d sm" onclick="addPresetBtn({label:'🗑️ Xóa Máy',emoji:'🗑️',style:'danger',action:{type:'vm',value:'delete'}})">🗑️ Xóa Máy</button>
@@ -389,6 +395,8 @@ function inspector(){
     const actTypes=[
       ['menu','🗂 Chuyển sang menu khác (Switch Menu)'],
       ['panel','🎛️ Mở bảng ẩn riêng tư (Ephemeral Modal/Panel)'],
+      ['modal','📋 Bật bảng ẩn nhập tên & PIN (Discord Modal Popup)'],
+      ['prompt','📝 Hiện thông tin kết nối & Prompt (Code Ephemeral)'],
       ['vm','💻 Thao tác máy ảo (Start/Restart/Stop/Reload/Delete)'],
       ['set_dur','⏱️ Đặt thời lượng máy (1h, 2h, 3h, 5h...)'],
       ['set_pin','🔑 Đặt mã PIN GameViewer'],
@@ -529,6 +537,18 @@ function inspector(){
             <span class="chip" onclick="S('${ap}value','https://github.com/${esc(T.config?.storageRepo||'')}');${syncAct};pick('${k}')">Storage Repo</span>
           </div>`;
 
+      } else if(curType==='modal'){
+        ctrl=lab('Chức Năng Modal:','')
+          +`<select onchange="S('${ap}value',this.value);${syncAct};pick('${k}')">
+            <option value="modal_create" ${curVal==='modal_create'?'selected':''}>➕ Bật Form Ẩn Tạo Máy (Nhập Machine ID, PIN GameViewer, Thời lượng)</option>
+          </select>`;
+
+      } else if(curType==='prompt'){
+        ctrl=lab('Chức Năng Prompt:','')
+          +`<select onchange="S('${ap}value',this.value);${syncAct};pick('${k}')">
+            <option value="prompt:show" ${curVal==='prompt:show'?'selected':''}>📝 Hiển thị toàn bộ thông tin kết nối máy ảo (YAML block bí mật)</option>
+          </select>`;
+
       } else {
         ctrl=`<div class="mu" style="margin-top:6px;padding:6px;background:#1e1e30;border-radius:6px">ℹ️ Tiến trình này tự động thực thi khi người dùng bấm nút trong Discord.</div>`;
       }
@@ -543,7 +563,7 @@ function inspector(){
           </div>
         </div>
         ${lab('Chọn loại hành động:','')}
-        <select onchange="S('${ap}type',this.value);if(this.value=='menu')S('${ap}value','${T.menus[0]?.id||''}');else if(this.value=='panel')S('${ap}value','mgr');else if(this.value=='vm')S('${ap}value','start');else if(this.value=='set_dur')S('${ap}value','5h00m');else if(this.value=='set_pin')S('${ap}value','Aistv2026');else if(this.value=='nav')S('${ap}value','prev');${syncAct};pick('${k}')">
+        <select onchange="S('${ap}type',this.value);if(this.value=='menu')S('${ap}value','${T.menus[0]?.id||''}');else if(this.value=='panel')S('${ap}value','mgr');else if(this.value=='modal')S('${ap}value','modal_create');else if(this.value=='prompt')S('${ap}value','prompt:show');else if(this.value=='vm')S('${ap}value','start');else if(this.value=='set_dur')S('${ap}value','5h00m');else if(this.value=='set_pin')S('${ap}value','Aistv2026');else if(this.value=='nav')S('${ap}value','prev');${syncAct};pick('${k}')">
           ${actTypes.map(([v,t])=>`<option value="${v}" ${curType==v?'selected':''}>${t}</option>`).join('')}
         </select>
         ${ctrl}
@@ -817,7 +837,28 @@ async function submitCreateVm(){
 // ================= TAB 6: CÀI ĐẶT HỆ THỐNG 2-REPO =================
 function tSet(){
   const c=T.config||{};
-  return `<div class="card"><h3 style="margin:0 0 10px;color:#c4b5fd">⚙️ Cấu hình Hệ Thống 2-Repo & GitHub Actions</h3>
+  const allowed = Array.isArray(c.allowedUsers) ? c.allowedUsers : ['946662197168341053'];
+  return `<div class="card"><h3 style="margin:0 0 10px;color:#c4b5fd">🛡️ Phân Quyền Sử Dụng Máy Ảo (Chỉ Người Được Cấp Mới Được Dùng)</h3>
+  <div class="hint">Chỉ có <b>Root Admin</b> (<code>946662197168341053</code>) và các User ID / Role được cấp quyền bên dưới mới có thể gõ lệnh <code>!may</code>, xem máy sở hữu và thao tác các nút điều khiển.</div>
+  <div class="g2">
+    <div>${lab('Root Admin Discord ID (Toàn Quyền)','')}${inp('config.rootAdmin')}</div>
+    <div class="wide">
+      ${lab('Danh Sách User ID Được Cấp Quyền (Allowed Users)','')}
+      <div class="chips" style="margin-bottom:6px">
+        ${allowed.map((uid,idx)=>`<span class="chip" title="Xóa quyền user này" onclick="removeAllowedUser('${uid}')">${esc(uid)} ${uid===(c.rootAdmin||'946662197168341053')?'👑':''} ✕</span>`).join('')}
+      </div>
+      <div class="r">
+        <input id="new_allow_uid" placeholder="Nhập Discord User ID cần cấp quyền (vd: 946662197168341053)..." style="flex:1">
+        <button class="g sm" type="button" onclick="addAllowedUser()">＋ Cấp Quyền User</button>
+      </div>
+    </div>
+    <div class="wide">
+      ${lab('Vai Trò (Role) Được Cấp Quyền Sử Dụng','')}
+      ${rolePick('config.allowedRoles')}
+    </div>
+  </div></div>
+
+  <div class="card"><h3 style="margin:0 0 10px;color:#c4b5fd">⚙️ Cấu hình Hệ Thống 2-Repo & GitHub Actions</h3>
   <div class="g2">
     <div>${lab('Storage Repo (Kho Lưu Ổ Đĩa Gốc)','')}${inp('config.storageRepo')}</div>
     <div>${lab('Runner Repo (Nơi Treo Actions)','')}${inp('config.runnerRepo')}</div>
@@ -840,6 +881,122 @@ function tSet(){
   </div></div>
 
   <div class="card"><h3 style="margin:0 0 8px">💾 Sao lưu / chuyển cấu hình</h3><div class="r"><button class="s" onclick="exportCfg()">⬇ Xuất JSON</button><label class="s" style="margin:0;background:#2a2a3d;padding:6px 13px;border-radius:8px;cursor:pointer;color:#fff;text-transform:none;font-size:14px">⬆ Nhập JSON<input type=file accept=".json" style="display:none" onchange="importCfg(this)"></label><button class="d" onclick="resetCfg()">♻ Khôi phục mặc định (lệnh & menu RDP)</button></div></div>`;
+}
+
+function addAllowedUser(){
+  const inpEl=$('new_allow_uid');if(!inpEl)return;
+  const uid=inpEl.value.trim().replace(/[^0-9]/g,'');
+  if(!uid||uid.length<16)return toast('User ID Discord không hợp lệ!');
+  T.config=T.config||{};
+  T.config.allowedUsers=Array.isArray(T.config.allowedUsers)?T.config.allowedUsers:['946662197168341053'];
+  if(!T.config.allowedUsers.includes(uid)){
+    T.config.allowedUsers.push(uid);
+    dirty(true);
+    draw();
+    toast('✔ Đã thêm quyền cho User ID: '+uid);
+  } else {
+    toast('User ID này đã có trong danh sách!');
+  }
+}
+
+function removeAllowedUser(uid){
+  const ra=T.config?.rootAdmin||'946662197168341053';
+  if(uid===ra)return toast('Không thể xóa quyền của Root Admin!');
+  if(!confirm('Thu hồi quyền của User '+uid+'?'))return;
+  T.config=T.config||{};
+  T.config.allowedUsers=(Array.isArray(T.config.allowedUsers)?T.config.allowedUsers:['946662197168341053']).filter(u=>u!==uid);
+  dirty(true);
+  draw();
+  toast('🗑 Đã thu hồi quyền của User '+uid);
+}
+
+function loadPresetCardTemplate(){
+  let idx = T.menus.findIndex(x => x.id === 'vm_detail');
+  const template = {
+    id: 'vm_detail',
+    name: 'Bảng Điều Khiển Chi Tiết Máy (Image.png)',
+    ownerOnly: true,
+    content: '',
+    embed: {
+      enabled: true,
+      color: '#1e1e2e',
+      title: 'Máy {curDisplayName}',
+      description: '**ID Định Danh:** `{curMachineId}`\n**GameViewer ID:** **{curGvId}**\n**Mã PIN:** `{curDisplayPin}`\n**StarDesk ID:** `{curStardeskId}`\n**Thời gian:** **{curRemain}**\n**Chủ sở hữu:** {curOwner}',
+      url: '',
+      thumbnail: '',
+      image: '',
+      author: { name: 'Máy {curDisplayName} • {curStatusBadge}', icon: '' },
+      footer: { text: 'NetEase GameViewer & StarDesk • Chế độ điều khiển trực tiếp', icon: '' },
+      timestamp: false,
+      fields: []
+    },
+    rows: [
+      [
+        { label: 'Chạy', emoji: '▶', style: 'success', action: { type: 'vm', value: 'start' } },
+        { label: 'Khởi động', emoji: '🔄', style: 'primary', action: { type: 'vm', value: 'restart' } },
+        { label: 'Tắt', emoji: '🛑', style: 'danger', action: { type: 'vm', value: 'stop' } },
+        { label: 'Prompt', emoji: '📝', style: 'secondary', action: { type: 'prompt', value: 'prompt:show' } },
+        { label: '', emoji: '🗑', style: 'danger', action: { type: 'vm', value: 'delete' } }
+      ],
+      [
+        { label: 'Danh Sách Máy', emoji: '🔙', style: 'secondary', action: { type: 'menu', value: 'main' } },
+        { label: '5 Giờ', emoji: '⏱️', style: 'secondary', action: { type: 'set_dur', value: '5h00m' } },
+        { label: 'PIN Aistv2026', emoji: '🔑', style: 'secondary', action: { type: 'set_pin', value: 'Aistv2026' } },
+        { label: 'Hiện/Ẩn PIN', emoji: '🙈', style: 'secondary', action: { type: 'toggle_pin', value: 'toggle' } }
+      ]
+    ]
+  };
+  if(idx >= 0){
+    T.menus[idx] = template;
+    MI = idx;
+  } else {
+    T.menus.push(template);
+    MI = T.menus.length - 1;
+  }
+  dirty(true);
+  draw();
+  toast('✔ Đã nạp mẫu giao diện Thẻ Máy Chi Tiết (Image.png)!');
+}
+
+function loadPresetMainTemplate(){
+  let idx = T.menus.findIndex(x => x.id === 'main');
+  const template = {
+    id: 'main',
+    name: 'Bảng Danh Sách Máy Sở Hữu',
+    ownerOnly: false,
+    content: '',
+    embed: {
+      enabled: true,
+      color: '#8b5cf6',
+      title: '🎮 DANH SÁCH MÁY ẢO CỦA BẠN',
+      description: '👤 **Chủ sở hữu:** {user}\n📊 **Thống kê:** 🟢 Online: **{onlineCount}** │ 🔴 Offline: **{offlineCount}** │ 📦 Tổng: **{totalCount}** máy sở hữu\n🏃 **Runner Repo:** `{runnerRepo}` │ 💽 **Kho Lưu Ổ:** `{storageRepo}`\n\n{machineList}\n\n💡 *Bấm trực tiếp vào nút tên máy bên dưới để mở Bảng Điều Khiển Chi Tiết!*',
+      url: '',
+      thumbnail: '',
+      image: '',
+      author: { name: 'AISTV Cloud System', icon: '' },
+      footer: { text: 'Chỉ hiển thị máy bạn sở hữu • Được Admin 946662197168341053 chứng thực', icon: '' },
+      timestamp: true,
+      fields: []
+    },
+    rows: [
+      [
+        { label: 'Tạo Máy Mới', emoji: '➕', style: 'success', action: { type: 'modal', value: 'modal_create' } },
+        { label: 'Làm Mới', emoji: '🔄', style: 'secondary', action: { type: 'refresh', value: 'refresh' } },
+        { label: 'Hiện/Ẩn PIN', emoji: '👁️', style: 'secondary', action: { type: 'toggle_pin', value: 'toggle' } },
+        { label: 'Web Quản Lý', emoji: '🌐', style: 'link', action: { type: 'link', value: 'http://datdemo.duckdns.org:3000/rdp-manager' } }
+      ]
+    ]
+  };
+  if(idx >= 0){
+    T.menus[idx] = template;
+    MI = idx;
+  } else {
+    T.menus.push(template);
+    MI = T.menus.length - 1;
+  }
+  dirty(true);
+  draw();
+  toast('✔ Đã nạp mẫu Bảng Danh Sách Máy Sở Hữu (Menu 1)!');
 }
 
 function exportCfg(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(T,null,2)],{type:'application/json'}));a.download='rdp-config.json';a.click()}
