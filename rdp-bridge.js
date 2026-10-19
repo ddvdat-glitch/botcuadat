@@ -81,13 +81,14 @@ const https = require('https');
           
 // HOISTED HELPERS
 function getRdpConfig() {
-                    const st = loadBridgeState();
-                    st.config = st.config || {};
-                    const storageRepo = st.config.storageRepo || process.env.STORAGE_REPO || 'ddvdat-glitch/rdp';
-                    const runnerRepo = st.config.runnerRepo || process.env.RUNNER_REPO || 'ohohhoho82-alt/app';
-                    const token = st.config.token || process.env.PAT_TOKEN || process.env.RDP_GH_TOKEN || process.env.STORAGE_GH_TOKEN || process.env.GH_TOKEN || '';
-                    const rootAdmin = st.config.rootAdmin || '946662197168341053';
-                    return { storageRepo, runnerRepo, token, rootAdmin };
+                    const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+                    const r = d.rdp || (d.shared && d.shared.rdp) || d;
+                    const cfg = r.config || {};
+                    const storageRepo = cfg.storageRepo || process.env.STORAGE_REPO || 'ddvdat-glitch/rdp';
+                    const runnerRepo = cfg.runnerRepo || process.env.RUNNER_REPO || 'ohohhoho82-alt/app';
+                    const token = cfg.token || process.env.GITHUB_TOKEN || process.env.PAT_TOKEN || process.env.RDP_GH_TOKEN || process.env.STORAGE_GH_TOKEN || process.env.GH_TOKEN || '';
+                    const rootAdmin = cfg.rootAdmin || '946662197168341053';
+                    return { storageRepo, runnerRepo, token, rootAdmin, ...cfg };
                   }
 
                   function ghRequest(method, repo, endpoint, body, customToken) {
@@ -103,7 +104,9 @@ function getRdpConfig() {
                         'User-Agent': 'AISTV-RDP-Manager-Web',
                         'Accept': 'application/vnd.github+json'
                       };
-                      if (token) headers['Authorization'] = `token ${token}`;
+                      if (token) {
+                        headers['Authorization'] = (token.startsWith('Bearer ') || token.startsWith('token ')) ? token : `token ${token}`;
+                      }
                       if (dataStr) {
                         headers['Content-Type'] = 'application/json';
                         headers['Content-Length'] = Buffer.byteLength(dataStr);
@@ -824,13 +827,14 @@ const origCreateServer = http.createServer;
                   // CÁC HÀM TIỆN ÍCH GITHUB API & TỰ ĐỘNG TÁI TẠO WORKFLOW
                   // ==========================================================================
                   function getRdpConfig() {
-                    const st = loadBridgeState();
-                    st.config = st.config || {};
-                    const storageRepo = st.config.storageRepo || process.env.STORAGE_REPO || 'ddvdat-glitch/rdp';
-                    const runnerRepo = st.config.runnerRepo || process.env.RUNNER_REPO || 'ohohhoho82-alt/app';
-                    const token = st.config.token || process.env.PAT_TOKEN || process.env.RDP_GH_TOKEN || process.env.STORAGE_GH_TOKEN || process.env.GH_TOKEN || '';
-                    const rootAdmin = st.config.rootAdmin || '946662197168341053';
-                    return { storageRepo, runnerRepo, token, rootAdmin };
+                    const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+                    const r = d.rdp || (d.shared && d.shared.rdp) || d;
+                    const cfg = r.config || {};
+                    const storageRepo = cfg.storageRepo || process.env.STORAGE_REPO || 'ddvdat-glitch/rdp';
+                    const runnerRepo = cfg.runnerRepo || process.env.RUNNER_REPO || 'ohohhoho82-alt/app';
+                    const token = cfg.token || process.env.GITHUB_TOKEN || process.env.PAT_TOKEN || process.env.RDP_GH_TOKEN || process.env.STORAGE_GH_TOKEN || process.env.GH_TOKEN || '';
+                    const rootAdmin = cfg.rootAdmin || '946662197168341053';
+                    return { storageRepo, runnerRepo, token, rootAdmin, ...cfg };
                   }
 
                   function ghRequest(method, repo, endpoint, body, customToken) {
@@ -846,7 +850,9 @@ const origCreateServer = http.createServer;
                         'User-Agent': 'AISTV-RDP-Manager-Web',
                         'Accept': 'application/vnd.github+json'
                       };
-                      if (token) headers['Authorization'] = `token ${token}`;
+                      if (token) {
+                        headers['Authorization'] = (token.startsWith('Bearer ') || token.startsWith('token ')) ? token : `token ${token}`;
+                      }
                       if (dataStr) {
                         headers['Content-Type'] = 'application/json';
                         headers['Content-Length'] = Buffer.byteLength(dataStr);
@@ -1563,6 +1569,18 @@ function init(ctx) {
   if (ctx && typeof ctx.log === 'function') {
     ctx.log('system', 'RDP Bridge & Bot Controller initialized');
   }
+  // Tự động quét và đồng bộ kho máy ảo khi khởi động
+  setTimeout(() => {
+    syncAllMachinesWithGithub().catch(() => {});
+  }, 2000);
+
+  // Chu kỳ tự động đồng bộ ngầm định kỳ mỗi 60 giây
+  setInterval(() => {
+    const cfg = getRdpConfig();
+    if (cfg.autoSync !== false) {
+      syncAllMachinesWithGithub().catch(() => {});
+    }
+  }, 60000);
 }
 
 // ----------------- TIỆN ÍCH ĐỊNH DẠNG & MÃ PIN -----------------
@@ -1628,10 +1646,17 @@ function getRdpVars(uid, extraVars = {}) {
   const isRoot = isRootAdmin(uid, cfg.rootAdmin);
 
   const allMachines = rdp.machines || {};
-  const myMachineKeys = Object.keys(allMachines).filter(k => {
+  let myMachineKeys = Object.keys(allMachines).filter(k => {
+    const m = allMachines[k];
     if (isRoot || uid === 'any') return true;
-    return allMachines[k].ownerId === uid;
+    if (!m.ownerId || m.ownerId === 'all' || m.ownerId === 'public') return true;
+    return m.ownerId === uid;
   });
+
+  // Nếu người dùng chưa gán máy riêng, hiển thị toàn bộ máy công khai trong hệ thống để không bị trống
+  if (myMachineKeys.length === 0 && Object.keys(allMachines).length > 0) {
+    myMachineKeys = Object.keys(allMachines);
+  }
 
   let onlineCount = 0;
   let offlineCount = 0;
@@ -1671,9 +1696,62 @@ function getRdpVars(uid, extraVars = {}) {
     curPass: curM.pass || curM.gvPin || 'Aistv@2026',
     curRemain: curM.remainSec != null ? hms(curM.remainSec) : (curM.duration || '5h'),
     curOwner: curM.ownerId ? `<@${curM.ownerId}>` : 'Admin',
+    curAutoPrompt: curM.autoPrompt || `[MÁY: ${(curM.displayName || curM.name || curKey).toUpperCase()}] Trạng thái: ${curM.isOnline ? '🟢 Online' : '🔴 Offline'} | ID: ${curM.gvId || 'Chưa có'} | PIN: ${curM.gvPin || 'Aistv2026'}`,
     ...extraVars
   };
   return vars;
+}
+
+// ----------------- KIỂM TRA ĐIỀU KIỆN HIỂN THỊ NÚT BẤM -----------------
+function checkButtonCondition(b, vars, uid) {
+  if (!b) return true;
+  const rawCond = (b.condition === 'custom' && b.conditionExpr) ? b.conditionExpr : (b.condition || 'always');
+  if (!rawCond || rawCond === 'always' || rawCond === '') return true;
+  const cfg = getRdpConfig();
+  const isRoot = isRootAdmin(uid, cfg.rootAdmin);
+  const cond = String(rawCond).toLowerCase().trim();
+
+  if (cond === 'online_only') {
+    return vars.onlineCount > 0 || (vars.curStatusBadge && vars.curStatusBadge.includes('🟢'));
+  }
+  if (cond === 'offline_only') {
+    return vars.offlineCount > 0 || (vars.curStatusBadge && (vars.curStatusBadge.includes('🔴') || vars.curStatusBadge.includes('Đã tắt')));
+  }
+  if (cond === 'admin_only') {
+    return isRoot;
+  }
+  if (cond === 'owner_only') {
+    return isRoot || (vars.curOwner && vars.curOwner.includes(uid));
+  }
+  if (cond === 'has_vm') {
+    return (vars.totalCount || 0) > 0;
+  }
+  if (cond === 'no_vm') {
+    return (vars.totalCount || 0) === 0;
+  }
+  if (cond === 'has_gvid') {
+    return vars.curGvId && !vars.curGvId.includes('Chờ') && !vars.curGvId.includes('none');
+  }
+
+  if (rawCond.includes('{') || rawCond.includes('==') || rawCond.includes('!=') || rawCond.includes('>')) {
+    try {
+      const filled = fill(rawCond, vars);
+      if (filled.includes('==')) {
+        const [left, right] = filled.split('==').map(s => s.trim().replace(/^['"]|['"]$/g, ''));
+        return left === right;
+      }
+      if (filled.includes('!=')) {
+        const [left, right] = filled.split('!=').map(s => s.trim().replace(/^['"]|['"]$/g, ''));
+        return left !== right;
+      }
+      if (filled.includes('>')) {
+        const [left, right] = filled.split('>').map(s => parseFloat(s.trim()));
+        return left > right;
+      }
+    } catch {}
+  }
+
+  return true;
 }
 
 // ----------------- TẠO PAYLOAD DISCORD EMBED & NÚT TỪ MENU -----------------
@@ -1720,14 +1798,17 @@ function buildRdpPayload(menu, vars, uid) {
     const comps = [];
     row.forEach((b, ci) => {
       try {
+        if (!checkButtonCondition(b, vars, uid)) return;
         const bb = new D.ButtonBuilder();
         const label = fill(b.label, vars).slice(0, 80);
         if (label) bb.setLabel(label);
         if (b.emoji) bb.setEmoji(b.emoji.trim());
         if (!label && !b.emoji) return;
         if (b.disabled) bb.setDisabled(true);
-        if (b.action?.type === 'link' || b.style === 'link') {
-          const u = fill(b.action?.value, vars);
+        const isLink = b.style === 'link' || b.action?.type === 'link' || (Array.isArray(b.actions) && b.actions.some(a => a.type === 'link'));
+        if (isLink) {
+          const linkAct = (Array.isArray(b.actions) && b.actions.find(a => a.type === 'link')) || b.action;
+          const u = fill(linkAct?.value, vars);
           if (!okUrl(u)) return;
           bb.setStyle(D.ButtonStyle.Link).setURL(u);
         } else {
@@ -1903,33 +1984,90 @@ async function scanAndRebuildWorkflowsDirect(upgradeToLatest = false) {
   return { totalFiles: ymlFiles.length, scannedCount: list.length, upgradedCount, machines: list };
 }
 
-// ----------------- ĐỒNG BỘ TRẠNG THÁI MÁY TỪ RUNNER REPO -----------------
+// ----------------- ĐỒNG BỘ TRẠNG THÁI MÁY TỪ RUNNER REPO & STORAGE REPO -----------------
 async function syncAllMachinesWithGithub() {
-  const st = loadBridgeState();
+  const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+  const st = d.rdp || (d.shared && d.shared.rdp) || d;
   const cfg = getRdpConfig();
   st.machines = st.machines || {};
 
+  // 1. Quét toàn bộ tệp workflow trên Runner Repo để nhận diện các máy ảo
+  try {
+    const contents = await ghRequest('GET', cfg.runnerRepo, '/contents/.github/workflows', null, cfg.token);
+    if (Array.isArray(contents)) {
+      const ignored = ['taomay.yml', 'taomay.yaml', 'taomaygoc.yml', 'bot.yml', 'botcuadat.yml'];
+      const ymlFiles = contents.filter(f => f.type === 'file' && /\.(ya?ml)$/i.test(f.name) && !ignored.includes(f.name.toLowerCase()));
+
+      for (const f of ymlFiles) {
+        const mId = f.name.replace(/\.(ya?ml)$/i, '').toLowerCase();
+        if (!st.machines[mId]) {
+          st.machines[mId] = {
+            name: mId,
+            displayName: `Máy ${mId.toUpperCase()}`,
+            duration: '5h00m',
+            gvPin: 'Aistv2026',
+            created: Date.now(),
+            repo: cfg.runnerRepo,
+            storageRepo: cfg.storageRepo
+          };
+        }
+      }
+    }
+  } catch (err) {
+    if (botCtx && typeof botCtx.log === 'function') botCtx.log('warn', `syncAllMachines scan workflows: ${err.message}`);
+  }
+
+  // 2. Quét toàn bộ Actions runs đang chạy hoặc mới nhất trên Runner Repo
+  try {
+    const runsRes = await ghRequest('GET', cfg.runnerRepo, '/actions/runs?per_page=30', null, cfg.token);
+    if (runsRes && Array.isArray(runsRes.workflow_runs)) {
+      for (const r of runsRes.workflow_runs) {
+        const wfName = (r.path || '').replace('.github/workflows/', '').replace(/\.(ya?ml)$/i, '').toLowerCase();
+        if (st.machines[wfName]) {
+          const m = st.machines[wfName];
+          if (!m.runId || r.id >= m.runId) {
+            m.runId = r.id;
+            m.status = r.status;
+            m.conclusion = r.conclusion;
+            m.runUrl = r.html_url;
+            m.isOnline = (r.status === 'in_progress');
+            if (r.run_started_at) {
+              const started = new Date(r.run_started_at).getTime();
+              m.elapsedSec = Math.max(0, Math.floor((Date.now() - started) / 1000));
+              const totalSec = (m.duration && m.duration.includes('1h')) ? 3600 : ((m.duration && m.duration.includes('3h')) ? 10800 : 18000);
+              m.remainSec = Math.max(0, totalSec - m.elapsedSec);
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    if (botCtx && typeof botCtx.log === 'function') botCtx.log('warn', `syncAllMachines runs: ${err.message}`);
+  }
+
+  // 3. Đồng bộ status.json & ip.txt từ nhánh aistv-state-* trên Storage Repo
   for (const name of Object.keys(st.machines)) {
     const m = st.machines[name];
     try {
-      const runs = await ghRequest('GET', cfg.runnerRepo, `/actions/workflows/${name}.yml/runs?per_page=1`, null, cfg.token);
-      if (runs && runs.workflow_runs && runs.workflow_runs[0]) {
-        const r = runs.workflow_runs[0];
-        m.runId = r.id;
-        m.status = r.status;
-        m.conclusion = r.conclusion;
-        m.runUrl = r.html_url;
-        m.isOnline = (r.status === 'in_progress');
-        if (r.run_started_at) {
-          const started = new Date(r.run_started_at).getTime();
-          m.elapsedSec = Math.max(0, Math.floor((Date.now() - started) / 1000));
-          const totalSec = (m.duration && m.duration.includes('1h')) ? 3600 : ((m.duration && m.duration.includes('3h')) ? 10800 : 18000);
-          m.remainSec = Math.max(0, totalSec - m.elapsedSec);
+      const statusRes = await ghRequest('GET', cfg.storageRepo, `/contents/status.json?ref=aistv-state-${name}`, null, cfg.token);
+      if (statusRes && statusRes.content) {
+        const rawJson = Buffer.from(statusRes.content.replace(/\s+/g, ''), 'base64').toString('utf8');
+        const stateObj = JSON.parse(rawJson);
+        if (stateObj.gameviewerId || stateObj.gvId) m.gvId = stateObj.gameviewerId || stateObj.gvId;
+        if (stateObj.gameviewerPin || stateObj.gvPin) m.gvPin = stateObj.gameviewerPin || stateObj.gvPin;
+        if (stateObj.stardeskId) m.stardeskId = stateObj.stardeskId;
+        if (stateObj.duration) m.duration = stateObj.duration;
+        if (stateObj.status) {
+          if (stateObj.status.toLowerCase() === 'online') m.isOnline = true;
+          else if (stateObj.status.toLowerCase() === 'stopped') m.isOnline = false;
         }
       }
     } catch {}
   }
+
   saveBridgeState(st);
+  if (botCtx && typeof botCtx.saveNow === 'function') botCtx.saveNow();
+  return st.machines;
 }
 
 // ----------------- XỬ LÝ SỰ KIỆN TIN NHẮN (LỆNH BOT !may) -----------------
@@ -1979,6 +2117,10 @@ async function onMessage(msg) {
     const menu = (rdp.menus || []).find(m => m.id === (cmd.menu || 'main')) || (rdp.menus && rdp.menus[0]);
 
     if (cmd.type === 'menu') {
+      const allM = (rdp && rdp.machines) || {};
+      if (Object.keys(allM).length === 0) {
+        try { await syncAllMachinesWithGithub(); } catch {}
+      }
       const vars = getRdpVars(uid, { title: cmd.name });
       const payload = buildRdpPayload(menu, vars, uid);
       if (cmd.replyMode === 'send') await msg.channel.send(payload).catch(() => {});
@@ -2113,10 +2255,11 @@ async function onButton(i) {
     return i.reply({ content: '🚫 Đây là menu cá nhân của người khác. Hãy gõ `!may` để mở menu của bạn!', flags: D.MessageFlags.Ephemeral });
   }
 
-  const actType = btn.action?.type;
-  const actVal = btn.action?.value;
+  const actions = (Array.isArray(btn.actions) && btn.actions.length > 0)
+    ? btn.actions
+    : (btn.action ? [btn.action] : []);
 
-  const isEphemeralTrigger = (actType === 'panel' || btn.ephemeral === true || actVal === 'mgr' || actVal === 'create');
+  const isEphemeralTrigger = (btn.ephemeral === true || actions.some(a => a.type === 'panel' || a.value === 'mgr' || a.value === 'create'));
 
   if (isEphemeralTrigger) {
     await i.deferReply({ flags: D.MessageFlags.Ephemeral });
@@ -2135,222 +2278,191 @@ async function onButton(i) {
   };
 
   try {
-    if (actType === 'panel' || actType === 'menu') {
-      if (actVal === 'close') {
-        return send({ content: '👋 Đã đóng bảng điều khiển. Gõ `!may` để mở lại!', components: [], embeds: [] });
-      }
+    let activeMenu = menu;
+    let explicitResponse = null;
 
-      if (actVal === 'mgr') {
-        const mgrMenu = rdp.menus.find(m => m.id === 'manager') || menu;
-        const vars = getRdpVars(uid);
-        return send(buildRdpPayload(mgrMenu, vars, uid));
-      }
+    for (const act of actions) {
+      const actType = act?.type;
+      const actVal = act?.value;
 
-      if (actVal === 'create') {
-        const autoName = `may-${Date.now().toString(36).slice(-4)}`;
-        const customCreate = rdp.menus.find(m => m.id === 'create' || m.id === 'create_panel');
-        if (customCreate) {
-          const vars = getRdpVars(uid, { curMachineId: autoName });
-          return send(buildRdpPayload(customCreate, vars, uid));
+      if (actType === 'panel' || actType === 'menu') {
+        if (actVal === 'close') {
+          explicitResponse = { content: '👋 Đã đóng bảng điều khiển. Gõ `!may` để mở lại!', components: [], embeds: [] };
+          break;
         }
-        const createMenu = {
-          id: 'create_panel',
-          ownerOnly: true,
-          embed: {
-            enabled: true,
-            color: '#10b981',
-            title: '➕ TẠO MÁY ẢO GAMEVIEWER & STARDESK MỚI',
-            description: `👉 **Chọn mã PIN có sẵn bên dưới để tạo máy nhanh:**\n• Tên máy tự sinh: \`${autoName}\` (Thời lượng 5h)\n• Hoặc gõ lệnh: \`!may tao <tên> 5h <mã_pin>\` trong kênh chat.`
-          },
-          rows: [
-            [
-              { label: '🔑 PIN Aistv2026 (5h)', emoji: '🔑', style: 'primary', action: { type: 'quickcreate', value: `${autoName}:Aistv2026:5h` } },
-              { label: '🔑 PIN Admin8888 (5h)', emoji: '🔑', style: 'secondary', action: { type: 'quickcreate', value: `${autoName}:Admin8888:5h` } },
-              { label: '🎲 PIN Random (5h)', emoji: '🎲', style: 'secondary', action: { type: 'quickcreate', value: `${autoName}:random:5h` } }
-            ],
-            [
-              { label: '🔙 Quay Lại', emoji: '🔙', style: 'secondary', action: { type: 'panel', value: 'mgr' } },
-              { label: '❌ Đóng', emoji: '❌', style: 'danger', action: { type: 'panel', value: 'close' } }
-            ]
-          ]
-        };
-        const vars = getRdpVars(uid);
-        return send(buildRdpPayload(createMenu, vars, uid));
+
+        if (actVal === 'mgr') {
+          activeMenu = rdp.menus.find(m => m.id === 'manager') || activeMenu;
+        } else if (actVal === 'create') {
+          const autoName = `may-${Date.now().toString(36).slice(-4)}`;
+          const customCreate = rdp.menus.find(m => m.id === 'create' || m.id === 'create_panel');
+          if (customCreate) {
+            activeMenu = customCreate;
+          } else {
+            activeMenu = {
+              id: 'create_panel',
+              ownerOnly: true,
+              embed: {
+                enabled: true,
+                color: '#10b981',
+                title: '➕ TẠO MÁY ẢO GAMEVIEWER & STARDESK MỚI',
+                description: `👉 **Chọn mã PIN có sẵn bên dưới để tạo máy nhanh:**\n• Tên máy tự sinh: \`${autoName}\` (Thời lượng 5h)\n• Hoặc gõ lệnh: \`!may tao <tên> 5h <mã_pin>\` trong kênh chat.`
+              },
+              rows: [
+                [
+                  { label: '🔑 PIN Aistv2026 (5h)', emoji: '🔑', style: 'primary', action: { type: 'quickcreate', value: `${autoName}:Aistv2026:5h` } },
+                  { label: '🔑 PIN Admin8888 (5h)', emoji: '🔑', style: 'secondary', action: { type: 'quickcreate', value: `${autoName}:Admin8888:5h` } },
+                  { label: '🎲 PIN Random (5h)', emoji: '🎲', style: 'secondary', action: { type: 'quickcreate', value: `${autoName}:random:5h` } }
+                ],
+                [
+                  { label: '🔙 Quay Lại', emoji: '🔙', style: 'secondary', action: { type: 'panel', value: 'mgr' } },
+                  { label: '❌ Đóng', emoji: '❌', style: 'danger', action: { type: 'panel', value: 'close' } }
+                ]
+              ]
+            };
+          }
+        } else {
+          const targetMenu = rdp.menus.find(m => m.id === actVal);
+          if (targetMenu) activeMenu = targetMenu;
+        }
       }
 
-      // Any target menu ID
-      const targetMenu = rdp.menus.find(m => m.id === actVal);
-      if (targetMenu) {
-        const vars = getRdpVars(uid);
-        return send(buildRdpPayload(targetMenu, vars, uid));
-      }
-    }
-
-    if (actType === 'quickcreate') {
-      const [qName, qPinVal, qDur] = (actVal || '').split(':');
-      const finalPin = qPinVal === 'random' ? generateRandomPin() : qPinVal;
-      await send({ content: `⏳ Đang khởi tạo máy **${qName}** (${qDur}) với mã PIN \`${finalPin}\`...`, embeds: [], components: [] });
-      try {
+      if (actType === 'quickcreate') {
+        const [qName, qPinVal, qDur] = (actVal || '').split(':');
+        const finalPin = qPinVal === 'random' ? generateRandomPin() : qPinVal;
         await createMachineWorkflow(qName, qDur, finalPin, uid, i.member?.displayName || i.user.username);
-        const mgrMenu = rdp.menus.find(m => m.id === 'manager') || menu;
+        const mgrMenu = rdp.menus.find(m => m.id === 'manager') || activeMenu;
         rdp.selectedVm = rdp.selectedVm || {};
         rdp.selectedVm[uid] = qName;
-        const vars = getRdpVars(uid, { curMachineId: qName });
-        return send(buildRdpPayload(mgrMenu, vars, uid));
-      } catch (err) {
-        return send({ content: `❌ Lỗi tạo máy: ${err.message}`, components: [], embeds: [] });
+        activeMenu = mgrMenu;
       }
-    }
 
-    if (actType === 'toggle_pin') {
-      rdp.pinMasked = !rdp.pinMasked;
-      if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
-      saveBridgeState(rdp);
-      const curMenu = menu;
-      const vars = getRdpVars(uid);
-      return send(buildRdpPayload(curMenu, vars, uid));
-    }
+      if (actType === 'toggle_pin') {
+        rdp.pinMasked = !rdp.pinMasked;
+        if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
+        saveBridgeState(rdp);
+      }
 
-    if (actType === 'refresh') {
-      await syncAllMachinesWithGithub();
-      const vars = getRdpVars(uid);
-      return send(buildRdpPayload(menu, vars, uid));
-    }
+      if (actType === 'refresh') {
+        await syncAllMachinesWithGithub();
+      }
 
-    if (actType === 'nav') {
-      const allM = rdp.machines || {};
-      const myKeys = Object.keys(allM).filter(k => isRoot || allM[k].ownerId === uid);
-      if (actVal && actVal.startsWith('select:')) {
-        const selName = actVal.slice(7);
-        if (allM[selName]) {
+      if (actType === 'nav') {
+        const allM = rdp.machines || {};
+        const myKeys = Object.keys(allM);
+        if (actVal && actVal.startsWith('select:')) {
+          const selName = actVal.slice(7);
+          if (allM[selName]) {
+            rdp.selectedVm = rdp.selectedVm || {};
+            rdp.selectedVm[uid] = selName;
+            if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
+            saveBridgeState(rdp);
+          }
+        } else if (myKeys.length) {
+          const cur = (rdp.selectedVm && rdp.selectedVm[uid]) || myKeys[0];
+          const idx = myKeys.indexOf(cur);
+          let nextIdx = idx >= 0 ? idx : 0;
+          if (actVal === 'prev') nextIdx = (idx - 1 + myKeys.length) % myKeys.length;
+          else if (actVal === 'next') nextIdx = (idx + 1) % myKeys.length;
           rdp.selectedVm = rdp.selectedVm || {};
-          rdp.selectedVm[uid] = selName;
+          rdp.selectedVm[uid] = myKeys[nextIdx];
           if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
           saveBridgeState(rdp);
         }
-      } else if (myKeys.length) {
-        const cur = (rdp.selectedVm && rdp.selectedVm[uid]) || myKeys[0];
-        const idx = myKeys.indexOf(cur);
-        let nextIdx = idx >= 0 ? idx : 0;
-        if (actVal === 'prev') nextIdx = (idx - 1 + myKeys.length) % myKeys.length;
-        else if (actVal === 'next') nextIdx = (idx + 1) % myKeys.length;
-        rdp.selectedVm = rdp.selectedVm || {};
-        rdp.selectedVm[uid] = myKeys[nextIdx];
-        if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
-        saveBridgeState(rdp);
       }
-      const vars = getRdpVars(uid);
-      return send(buildRdpPayload(menu, vars, uid));
-    }
 
-    if (actType === 'set_dur') {
-      const curKey = (rdp.selectedVm && rdp.selectedVm[uid]) || Object.keys(rdp.machines || {})[0];
-      if (curKey && rdp.machines && rdp.machines[curKey]) {
-        rdp.machines[curKey].duration = actVal;
-        if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
-        saveBridgeState(rdp);
+      if (actType === 'set_dur') {
+        const curKey = (rdp.selectedVm && rdp.selectedVm[uid]) || Object.keys(rdp.machines || {})[0];
+        if (curKey && rdp.machines && rdp.machines[curKey]) {
+          rdp.machines[curKey].duration = actVal;
+          if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
+          saveBridgeState(rdp);
+        }
       }
-      const vars = getRdpVars(uid);
-      return send(buildRdpPayload(menu, vars, uid));
-    }
 
-    if (actType === 'set_pin') {
-      const curKey = (rdp.selectedVm && rdp.selectedVm[uid]) || Object.keys(rdp.machines || {})[0];
-      const pinVal = actVal === 'random' ? generateRandomPin() : actVal;
-      if (curKey && rdp.machines && rdp.machines[curKey]) {
-        rdp.machines[curKey].gvPin = pinVal;
-        if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
-        saveBridgeState(rdp);
-        try {
-          const tpl = loadTaomayTemplate();
-          if (tpl) {
-            const newYml = buildVmWorkflow(tpl, curKey, rdp.machines[curKey].duration || '5h', pinVal, cfg.storageRepo);
-            const curF = await ghRequest('GET', cfg.runnerRepo, `/contents/.github/workflows/${curKey}.yml`, null, cfg.token);
-            if (curF && curF.sha) {
-              await ghRequest('PUT', cfg.runnerRepo, `/contents/.github/workflows/${curKey}.yml`, {
-                message: `[AISTV] Đổi mã PIN máy ${curKey} thành ${pinVal}`,
-                content: Buffer.from(newYml, 'utf8').toString('base64'),
-                sha: curF.sha
-              }, cfg.token);
+      if (actType === 'set_pin') {
+        const curKey = (rdp.selectedVm && rdp.selectedVm[uid]) || Object.keys(rdp.machines || {})[0];
+        const pinVal = actVal === 'random' ? generateRandomPin() : actVal;
+        if (curKey && rdp.machines && rdp.machines[curKey]) {
+          rdp.machines[curKey].gvPin = pinVal;
+          if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
+          saveBridgeState(rdp);
+          try {
+            const tpl = loadTaomayTemplate();
+            if (tpl) {
+              const newYml = buildVmWorkflow(tpl, curKey, rdp.machines[curKey].duration || '5h', pinVal, cfg.storageRepo);
+              const curF = await ghRequest('GET', cfg.runnerRepo, `/contents/.github/workflows/${curKey}.yml`, null, cfg.token);
+              if (curF && curF.sha) {
+                await ghRequest('PUT', cfg.runnerRepo, `/contents/.github/workflows/${curKey}.yml`, {
+                  message: `[AISTV] Đổi mã PIN máy ${curKey} thành ${pinVal}`,
+                  content: Buffer.from(newYml, 'utf8').toString('base64'),
+                  sha: curF.sha
+                }, cfg.token);
+              }
+            }
+          } catch {}
+        }
+      }
+
+      if (actType === 'vm') {
+        const curKey = (rdp.selectedVm && rdp.selectedVm[uid]) || Object.keys(rdp.machines || {})[0];
+        if (curKey) {
+          const curM = rdp.machines && rdp.machines[curKey];
+          if (actVal === 'start') {
+            await dispatchWorkflow(cfg.runnerRepo, `${curKey}.yml`, {
+              duration: curM?.duration || '5h',
+              pin_code: curM?.gvPin || 'Aistv2026'
+            }, cfg.token);
+            if (curM) { curM.status = 'in_progress'; curM.isOnline = true; }
+          } else if (actVal === 'restart') {
+            await cancelWorkflowRuns(cfg.runnerRepo, `${curKey}.yml`, cfg.token);
+            await new Promise(r => setTimeout(r, 2000));
+            await dispatchWorkflow(cfg.runnerRepo, `${curKey}.yml`, {
+              duration: curM?.duration || '5h',
+              pin_code: curM?.gvPin || 'Aistv2026'
+            }, cfg.token);
+            if (curM) { curM.status = 'in_progress'; curM.isOnline = true; }
+          } else if (actVal === 'stop') {
+            await cancelWorkflowRuns(cfg.runnerRepo, `${curKey}.yml`, cfg.token);
+            if (curM) { curM.status = 'completed'; curM.isOnline = false; }
+          } else if (actVal === 'reload_info') {
+            await syncAllMachinesWithGithub();
+          } else if (actVal === 'delete') {
+            if (isRoot || curM?.ownerId === uid) {
+              await cancelWorkflowRuns(cfg.runnerRepo, `${curKey}.yml`, cfg.token);
+              try {
+                const curF = await ghRequest('GET', cfg.runnerRepo, `/contents/.github/workflows/${curKey}.yml`, null, cfg.token);
+                if (curF && curF.sha) {
+                  await ghRequest('DELETE', cfg.runnerRepo, `/contents/.github/workflows/${curKey}.yml`, {
+                    message: `[AISTV] Xóa máy ảo ${curKey}`,
+                    sha: curF.sha
+                  }, cfg.token);
+                }
+              } catch (e) {
+                if (botCtx && typeof botCtx.log === 'function') botCtx.log('warn', `Delete workflow ${curKey}.yml: ${e.message}`);
+              }
+              delete rdp.machines[curKey];
+              if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
+              saveBridgeState(rdp);
             }
           }
-        } catch {}
-      }
-      const vars = getRdpVars(uid);
-      return send(buildRdpPayload(menu, vars, uid));
-    }
-
-    if (actType === 'vm') {
-      const curKey = (rdp.selectedVm && rdp.selectedVm[uid]) || Object.keys(rdp.machines || {})[0];
-      if (!curKey) return send({ content: '⚠️ Bạn chưa chọn máy ảo nào.', components: [], embeds: [] });
-      const curM = rdp.machines && rdp.machines[curKey];
-
-      if (actVal === 'start') {
-        await dispatchWorkflow(cfg.runnerRepo, `${curKey}.yml`, {
-          duration: curM?.duration || '5h',
-          pin_code: curM?.gvPin || 'Aistv2026'
-        }, cfg.token);
-        if (curM) { curM.status = 'in_progress'; curM.isOnline = true; }
-      } else if (actVal === 'restart') {
-        await cancelWorkflowRuns(cfg.runnerRepo, `${curKey}.yml`, cfg.token);
-        await new Promise(r => setTimeout(r, 2000));
-        await dispatchWorkflow(cfg.runnerRepo, `${curKey}.yml`, {
-          duration: curM?.duration || '5h',
-          pin_code: curM?.gvPin || 'Aistv2026'
-        }, cfg.token);
-        if (curM) { curM.status = 'in_progress'; curM.isOnline = true; }
-      } else if (actVal === 'stop') {
-        await cancelWorkflowRuns(cfg.runnerRepo, `${curKey}.yml`, cfg.token);
-        if (curM) { curM.status = 'completed'; curM.isOnline = false; }
-      } else if (actVal === 'reload_info') {
-        await syncAllMachinesWithGithub();
-      } else if (actVal === 'delete') {
-        if (!isRoot && curM?.ownerId !== uid) {
-          return send({ content: '🚫 Bạn không có quyền xóa máy ảo này.', components: [], embeds: [] });
         }
-        await cancelWorkflowRuns(cfg.runnerRepo, `${curKey}.yml`, cfg.token);
-        try {
-          const curF = await ghRequest('GET', cfg.runnerRepo, `/contents/.github/workflows/${curKey}.yml`, null, cfg.token);
-          if (curF && curF.sha) {
-            await ghRequest('DELETE', cfg.runnerRepo, `/contents/.github/workflows/${curKey}.yml`, {
-              message: `[AISTV] Xóa máy ảo ${curKey}`,
-              sha: curF.sha
-            }, cfg.token);
-          }
-        } catch (e) {
-          if (botCtx && typeof botCtx.log === 'function') botCtx.log('warn', `Delete workflow ${curKey}.yml: ${e.message}`);
+      }
+
+      if (actType === 'cmd') {
+        const cmd = rdp.commands.find(c => c.id === actVal);
+        if (cmd && cmd.type === 'scan') {
+          await scanAndRebuildWorkflowsDirect(true);
         }
-        delete rdp.machines[curKey];
-        if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
-        saveBridgeState(rdp);
-        const vars = getRdpVars(uid);
-        return send({ content: `🗑️ Đã xóa máy ảo **${curKey}** thành công!`, ...buildRdpPayload(menu, vars, uid) });
-      }
-
-      if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
-      saveBridgeState(rdp);
-      const vars = getRdpVars(uid);
-      return send(buildRdpPayload(menu, vars, uid));
-    }
-
-    if (actType === 'menu') {
-      const targetMenu = rdp.menus.find(m => m.id === actVal);
-      if (!targetMenu) return send({ content: '⚠️ Menu đích không tồn tại.', components: [], embeds: [] });
-      const vars = getRdpVars(uid);
-      return send(buildRdpPayload(targetMenu, vars, uid));
-    }
-
-    if (actType === 'cmd') {
-      const cmd = rdp.commands.find(c => c.id === actVal);
-      if (!cmd) return send({ content: '⚠️ Lệnh không tồn tại.', components: [], embeds: [] });
-      if (cmd.type === 'scan') {
-        await send({ content: '⏳ Đang quét và nâng cấp toàn bộ workflow...', components: [], embeds: [] });
-        const res = await scanAndRebuildWorkflowsDirect(true);
-        const vars = getRdpVars(uid);
-        return send({ content: `🎉 Hoàn tất quét & nâng cấp **${res.upgradedCount}** workflow lên bản mới nhất!`, ...buildRdpPayload(menu, vars, uid) });
       }
     }
 
+    if (explicitResponse) return send(explicitResponse);
+
+    if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
+    saveBridgeState(rdp);
+    const vars = getRdpVars(uid);
+    return send(buildRdpPayload(activeMenu, vars, uid));
   } catch (err) {
     if (botCtx && typeof botCtx.log === 'function') {
       botCtx.log('error', `rdp button error: ${err.message}`);

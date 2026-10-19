@@ -261,7 +261,7 @@ function tCmds(){
 // ================= TAB 3: THIẾT KẾ MENU CANVA (GIỐNG TU TIÊN) =================
 const SW=['#8b5cf6','#6366f1','#60a5fa','#2dd4bf','#34d399','#fbbf24','#fb923c','#f87171','#f472b6','#e5e7eb','#5865f2','#1f2937'];
 const BST={primary:'#5865f2',secondary:'#4e5058',success:'#248046',danger:'#da373c',link:'#4e5058'};
-const VARL=()=>['onlineCount','offlineCount','totalCount','runnerRepo','storageRepo','machineList','curMachineId','curDisplayName','curStatusBadge','curGvId','curDisplayPin','curStardeskId','curUser','curPass','curRemain','curOwner'];
+const VARL=()=>['onlineCount','offlineCount','totalCount','runnerRepo','storageRepo','machineList','curMachineId','curDisplayName','curStatusBadge','curGvId','curDisplayPin','curStardeskId','curUser','curPass','curRemain','curOwner','pinMode','curAutoPrompt','webUrl'];
 
 const fillv=s=>String(s??'').replace(/\{([\w.]+)\}/g,(m,k)=>k in SV?SV[k]:m);
 const md=s=>esc(s).replace(/\*\*(.+?)\*\*/gs,'<b>$1</b>').replace(/(^|[^*])\*(?!\s)(.+?)\*/g,'$1<i>$2</i>').replace(/__(.+?)__/g,'<u>$1</u>').replace(/`([^`]+)`/g,'<code style="background:#1e1f22;padding:0 4px;border-radius:3px">$1</code>').replace(/\n/g,'<br>');
@@ -327,7 +327,12 @@ function canvas(){
     h+=`<div class="el fo${on('footer')}" onclick="pick('footer',event)">${e.footer?.text?md(fillv(e.footer.text)):'<span class="ph">＋ chân trang (footer)</span>'}</div></div>`;
   }
   (m.rows||[]).forEach((row,r)=>{
-    h+=`<div class="rowb" ondragover="event.preventDefault();this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="dropBtn(${r},null,event)">${row.map((b,c)=>`<span class="dbtn el${on('b:'+r+':'+c)}" style="background:${BST[b.style]||BST.secondary};${b.disabled?'opacity:0.45;cursor:not-allowed;':''}" draggable="true" ondragstart="DR={k:'b',r:${r},c:${c}}" ondragover="event.preventDefault();event.stopPropagation()" ondrop="dropBtn(${r},${c},event)" onclick="pick('b:${r}:${c}',event)">${esc(b.emoji||'')} ${esc(fillv(b.label))}${b.style=='link'||b.action?.type=='link'?' ↗':''}${b.ephemeral?' 🔒':''}</span>`).join('')}${row.length<5?`<span class="addb" onclick="addBtn(${r})">＋</span>`:''}</div>`;
+    h+=`<div class="rowb" ondragover="event.preventDefault();this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="dropBtn(${r},null,event)">${row.map((b,c)=>{
+      const isCond = b.condition && b.condition !== 'always';
+      const condBadge = isCond ? `<span style="font-size:9px;background:#312e81;color:#a5b4fc;padding:1px 3px;border-radius:3px;margin-left:3px" title="Điều kiện: ${esc(b.condition)}">🎯</span>` : '';
+      const actCount = (Array.isArray(b.actions) && b.actions.length > 1) ? `<span style="font-size:9px;background:#1e293b;color:#facc15;padding:1px 3px;border-radius:3px;margin-left:3px" title="${b.actions.length} tiến trình nối tiếp">⚡${b.actions.length}</span>` : '';
+      return `<span class="dbtn el${on('b:'+r+':'+c)}" style="background:${BST[b.style]||BST.secondary};${b.disabled?'opacity:0.45;cursor:not-allowed;':''}" draggable="true" ondragstart="DR={k:'b',r:${r},c:${c}}" ondragover="event.preventDefault();event.stopPropagation()" ondrop="dropBtn(${r},${c},event)" onclick="pick('b:${r}:${c}',event)">${esc(b.emoji||'')} ${esc(fillv(b.label))}${b.style=='link'||b.action?.type=='link'?' ↗':''}${b.ephemeral?' 🔒':''}${condBadge}${actCount}</span>`;
+    }).join('')}${row.length<5?`<span class="addb" onclick="addBtn(${r})">＋</span>`:''}</div>`;
   });
   if((m.rows||[]).length<5)h+=`<div class="newrow" ondragover="event.preventDefault()" ondrop="dropBtn(-1,null,event)" onclick="addRow()">＋ hàng nút mới (thả nút vào đây)</div>`;
   return h+'</div>';
@@ -375,7 +380,11 @@ function inspector(){
   else if(k.startsWith('b:')){
     const [,r,c]=k.split(':'),p=b+`rows.${r}.${c}.`,bt=m.rows[r]?.[c];
     if(!bt)return head('(trống)');
-    bt.action=bt.action||{type:'panel',value:'mgr'};
+    if(!Array.isArray(bt.actions)||!bt.actions.length){
+      bt.actions=[bt.action||{type:'panel',value:'mgr'}];
+    }
+    bt.action=bt.actions[0];
+    bt.condition=bt.condition||'always';
 
     const actTypes=[
       ['menu','🗂 Chuyển sang menu khác (Switch Menu)'],
@@ -392,117 +401,157 @@ function inspector(){
       ['close','❌ Đóng bảng điều khiển']
     ];
 
-    let valCtrl='';
-    const curVal=String(bt.action?.value||'');
+    const condOpts=[
+      ['always','🟢 Luôn hiển thị (Mặc định)'],
+      ['online_only','⚡ Chỉ hiện khi máy ĐANG CHẠY (Online)'],
+      ['offline_only','💤 Chỉ hiện khi máy ĐÃ TẮT (Offline)'],
+      ['has_vm','🖥️ Chỉ hiện khi CÓ máy ảo trong danh sách'],
+      ['no_vm','📭 Chỉ hiện khi CHƯA có máy nào (Danh sách trống)'],
+      ['has_gvid','🆔 Chỉ hiện khi ĐÃ CẤP ID GameViewer'],
+      ['owner_only','👑 Chỉ hiện cho Chủ sở hữu máy hoặc Admin'],
+      ['admin_only','🛡️ Chỉ hiện cho Root Admin'],
+      ['custom','✏️ Biểu thức điều kiện tùy biến ({biến} == ...)']
+    ];
 
-    if(bt.action.type==='menu'){
-      const menuOpts=T.menus.map(x=>[x.id,`🗂 ${x.name} (id: ${x.id})`]);
-      valCtrl=lab('Menu Đích Chuyển Đến:','')
-        +`<select onchange="if(this.value=='__custom__'){S('${p}action.value','');}else{S('${p}action.value',this.value);}pick('${k}')">
-          <option value="">— Chọn menu đích —</option>
-          ${menuOpts.map(([mid,mname])=>`<option value="${esc(mid)}" ${curVal===mid?'selected':''}>${esc(mname)}</option>`).join('')}
-          <option value="__custom__" ${curVal&&!T.menus.some(x=>x.id===curVal)?'selected':''}>✏️ Tùy biến (nhập ID menu khác)</option>
-        </select>`
-        +(curVal&&!T.menus.some(x=>x.id===curVal)||!curVal?lab('ID Menu Tùy Biến:','')+inp(p+'action.value',{ph:'Nhập ID menu (vd: main, manager...)'}):'');
+    function renderActionCtrl(act,ai){
+      const ap=p+`actions.${ai}.`;
+      const curType=act.type||'panel';
+      const curVal=String(act.value||'');
+      const syncAct=`T.menus[${MI}].rows[${r}][${c}].action=T.menus[${MI}].rows[${r}][${c}].actions[0]`;
 
-    } else if(bt.action.type==='panel'){
-      const panelOpts=[
-        ['mgr','🎛️ Bảng Quản Lý Ẩn (Manager Ephemeral)'],
-        ['create','➕ Bảng Tạo Máy Nhanh (Create VM Ephemeral)'],
-        ['close','❌ Đóng Bảng Điều Khiển (Close)'],
-        ...T.menus.map(x=>[x.id,`🗂 Bảng ẩn: ${x.name} (id: ${x.id})`])
-      ];
-      valCtrl=lab('Loại Bảng Ẩn / Menu Mở Riêng Tư:','')
-        +`<select onchange="if(this.value=='__custom__'){S('${p}action.value','');}else{S('${p}action.value',this.value);}pick('${k}')">
-          ${panelOpts.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
-          <option value="__custom__" ${curVal&&!panelOpts.some(x=>x[0]===curVal)?'selected':''}>✏️ Tùy biến (nhập ID menu khác)</option>
-        </select>`
-        +(curVal&&!panelOpts.some(x=>x[0]===curVal)?lab('ID Bảng Ẩn Tùy Biến:','')+inp(p+'action.value',{ph:'Nhập ID menu mở ẩn...'}):'');
+      let ctrl='';
+      if(curType==='menu'){
+        const menuOpts=T.menus.map(x=>[x.id,`🗂 ${x.name} (id: ${x.id})`]);
+        ctrl=lab('Menu Đích Chuyển Đến:','')
+          +`<select onchange="if(this.value=='__custom__'){S('${ap}value','');}else{S('${ap}value',this.value);}${syncAct};pick('${k}')">
+            <option value="">— Chọn menu đích —</option>
+            ${menuOpts.map(([mid,mname])=>`<option value="${esc(mid)}" ${curVal===mid?'selected':''}>${esc(mname)}</option>`).join('')}
+            <option value="__custom__" ${curVal&&!T.menus.some(x=>x.id===curVal)?'selected':''}>✏️ Tùy biến (nhập ID menu khác)</option>
+          </select>`
+          +(curVal&&!T.menus.some(x=>x.id===curVal)||!curVal?lab('ID Menu Tùy Biến:','')+inp(ap+'value',{ph:'Nhập ID menu (vd: main, manager...)'}):'')
+          +`<div class="r" style="margin-top:6px;gap:6px">
+            ${curVal&&T.menus.some(x=>x.id===curVal)?`<button class="s sm" type="button" onclick="openMenuById('${esc(curVal)}')">👁️ Mở menu này trong bộ thiết kế</button>`:''}
+            <button class="g sm" type="button" onclick="createAndLinkMenu(${r},${c},${ai})">➕ Tạo Menu Mới & Gắn Vào Nút</button>
+          </div>`;
 
-    } else if(bt.action.type==='vm'){
-      const vmActs=[
-        ['start','▶️ Khởi Chạy Máy Ảo (Start / Dispatch)'],
-        ['restart','🔄 Khởi Động Lại Máy Ảo (Restart Workflow)'],
-        ['stop','🛑 Tắt Máy Ảo (Stop / Cancel Runs)'],
-        ['reload_info','🔄 Làm Mới Trạng Thái Từ GitHub (Sync State)'],
-        ['delete','🗑️ Xóa Máy Ảo (Xóa Workflow Trên Repo)']
-      ];
-      valCtrl=lab('Lệnh Thao Tác Máy Ảo:','')
-        +`<select onchange="S('${p}action.value',this.value);pick('${k}')">
-          ${vmActs.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
-        </select>`;
+      } else if(curType==='panel'){
+        const panelOpts=[
+          ['mgr','🎛️ Bảng Quản Lý Ẩn (Manager Ephemeral)'],
+          ['create','➕ Bảng Tạo Máy Nhanh (Create VM Ephemeral)'],
+          ['close','❌ Đóng Bảng Điều Khiển (Close)'],
+          ...T.menus.map(x=>[x.id,`🗂 Bảng ẩn: ${x.name} (id: ${x.id})`])
+        ];
+        ctrl=lab('Loại Bảng Ẩn / Menu Mở Riêng Tư:','')
+          +`<select onchange="if(this.value=='__custom__'){S('${ap}value','');}else{S('${ap}value',this.value);}${syncAct};pick('${k}')">
+            ${panelOpts.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
+            <option value="__custom__" ${curVal&&!panelOpts.some(x=>x[0]===curVal)?'selected':''}>✏️ Tùy biến (nhập ID menu khác)</option>
+          </select>`
+          +(curVal&&!panelOpts.some(x=>x[0]===curVal)?lab('ID Bảng Ẩn Tùy Biến:','')+inp(ap+'value',{ph:'Nhập ID menu mở ẩn...'}):'');
 
-    } else if(bt.action.type==='set_dur'){
-      const durPresets=[
-        ['1h','⏱️ 1 Giờ (1h)'],
-        ['2h','⏱️ 2 Giờ (2h)'],
-        ['3h','⏱️ 3 Giờ (3h)'],
-        ['4h','⏱️ 4 Giờ (4h)'],
-        ['5h00m','⏱️ 5 Giờ (5h00m - Tiêu chuẩn)'],
-        ['6h','⏱️ 6 Giờ (6h)']
-      ];
-      valCtrl=lab('Thời Lượng Cài Đặt:','')
-        +`<select onchange="if(this.value=='__custom__'){S('${p}action.value','');}else{S('${p}action.value',this.value);}pick('${k}')">
-          ${durPresets.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
-          <option value="__custom__" ${curVal&&!durPresets.some(x=>x[0]===curVal)?'selected':''}>✏️ Tùy biến thời lượng</option>
-        </select>`
-        +(curVal&&!durPresets.some(x=>x[0]===curVal)?lab('Nhập Thời Lượng:','')+inp(p+'action.value',{ph:'VD: 5h30m, 4h, 30m...'}):'');
+      } else if(curType==='vm'){
+        const vmActs=[
+          ['start','▶️ Khởi Chạy Máy Ảo (Start / Dispatch)'],
+          ['restart','🔄 Khởi Động Lại Máy Ảo (Restart Workflow)'],
+          ['stop','🛑 Tắt Máy Ảo (Stop / Cancel Runs)'],
+          ['reload_info','🔄 Làm Mới Trạng Thái Từ GitHub (Sync State)'],
+          ['delete','🗑️ Xóa Máy Ảo (Xóa Workflow Trên Repo)']
+        ];
+        ctrl=lab('Lệnh Thao Tác Máy Ảo:','')
+          +`<select onchange="S('${ap}value',this.value);${syncAct};pick('${k}')">
+            ${vmActs.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
+          </select>`;
 
-    } else if(bt.action.type==='set_pin'){
-      const pinPresets=[
-        ['Aistv2026','🔑 Aistv2026 (Mặc định chuẩn)'],
-        ['Admin8888','🔑 Admin8888'],
-        ['Game2026','🔑 Game2026'],
-        ['ProGamer1','🔑 ProGamer1'],
-        ['random','🎲 Ngẫu nhiên (Mỗi lần sinh mã mới)']
-      ];
-      valCtrl=lab('Mã PIN GameViewer:','')
-        +`<select onchange="if(this.value=='__custom__'){S('${p}action.value','');}else{S('${p}action.value',this.value);}pick('${k}')">
-          ${pinPresets.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
-          <option value="__custom__" ${curVal&&!pinPresets.some(x=>x[0]===curVal)?'selected':''}>✏️ Nhập mã PIN tùy chọn</option>
-        </select>`
-        +(curVal&&!pinPresets.some(x=>x[0]===curVal)?lab('Nhập Mã PIN Tùy Chọn:','')+inp(p+'action.value',{ph:'Tối thiểu 8 ký tự'}):'');
+      } else if(curType==='set_dur'){
+        const durPresets=[
+          ['1h','⏱️ 1 Giờ (1h)'],
+          ['2h','⏱️ 2 Giờ (2h)'],
+          ['3h','⏱️ 3 Giờ (3h)'],
+          ['4h','⏱️ 4 Giờ (4h)'],
+          ['5h00m','⏱️ 5 Giờ (5h00m - Tiêu chuẩn)'],
+          ['6h','⏱️ 6 Giờ (6h)']
+        ];
+        ctrl=lab('Thời Lượng Cài Đặt:','')
+          +`<select onchange="if(this.value=='__custom__'){S('${ap}value','');}else{S('${ap}value',this.value);}${syncAct};pick('${k}')">
+            ${durPresets.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
+            <option value="__custom__" ${curVal&&!durPresets.some(x=>x[0]===curVal)?'selected':''}>✏️ Tùy biến thời lượng</option>
+          </select>`
+          +(curVal&&!durPresets.some(x=>x[0]===curVal)?lab('Nhập Thời Lượng:','')+inp(ap+'value',{ph:'VD: 5h30m, 4h, 30m...'}):'');
 
-    } else if(bt.action.type==='nav'){
-      const navOpts=[
-        ['prev','◀️ Máy Trước Đó (Previous)'],
-        ['next','▶️ Máy Kế Tiếp (Next)'],
-        ...Object.keys(T.machines||{}).map(mname=>[`select:${mname}`,`🖥️ Chọn Trực Tiếp: ${esc(T.machines[mname]?.displayName||mname)} (${mname})`])
-      ];
-      valCtrl=lab('Thao Tác Điều Hướng Máy:','')
-        +`<select onchange="S('${p}action.value',this.value);pick('${k}')">
-          ${navOpts.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
-        </select>`;
+      } else if(curType==='set_pin'){
+        const pinPresets=[
+          ['Aistv2026','🔑 Aistv2026 (Mặc định chuẩn)'],
+          ['Admin8888','🔑 Admin8888'],
+          ['Game2026','🔑 Game2026'],
+          ['ProGamer1','🔑 ProGamer1'],
+          ['random','🎲 Ngẫu nhiên (Mỗi lần sinh mã mới)']
+        ];
+        ctrl=lab('Mã PIN GameViewer:','')
+          +`<select onchange="if(this.value=='__custom__'){S('${ap}value','');}else{S('${ap}value',this.value);}${syncAct};pick('${k}')">
+            ${pinPresets.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
+            <option value="__custom__" ${curVal&&!pinPresets.some(x=>x[0]===curVal)?'selected':''}>✏️ Nhập mã PIN tùy chọn</option>
+          </select>`
+          +(curVal&&!pinPresets.some(x=>x[0]===curVal)?lab('Nhập Mã PIN Tùy Chọn:','')+inp(ap+'value',{ph:'Tối thiểu 8 ký tự'}):'');
 
-    } else if(bt.action.type==='quickcreate'){
-      valCtrl=lab('Cấu Hình Tạo Nhanh (tên:mã_pin:thời_lượng):','')
-        +inp(p+'action.value',{ph:'auto:Aistv2026:5h'})
-        +`<div class="chips" style="margin-top:4px">
-          <span class="chip" onclick="S('${p}action.value','auto:Aistv2026:5h');pick('${k}')">Aistv2026 5h</span>
-          <span class="chip" onclick="S('${p}action.value','auto:random:5h');pick('${k}')">Random 5h</span>
-          <span class="chip" onclick="S('${p}action.value','auto:Admin8888:3h');pick('${k}')">Admin8888 3h</span>
-        </div>`;
+      } else if(curType==='nav'){
+        const navOpts=[
+          ['prev','◀️ Máy Trước Đó (Previous)'],
+          ['next','▶️ Máy Kế Tiếp (Next)'],
+          ...Object.keys(T.machines||{}).map(mname=>[`select:${mname}`,`🖥️ Chọn Trực Tiếp: ${esc(T.machines[mname]?.displayName||mname)} (${mname})`])
+        ];
+        ctrl=lab('Thao Tác Điều Hướng Máy:','')
+          +`<select onchange="S('${ap}value',this.value);${syncAct};pick('${k}')">
+            ${navOpts.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
+          </select>`;
 
-    } else if(bt.action.type==='cmd'){
-      const cmdOpts=T.commands.map(c=>[c.id,`⌨️ ${c.name} (${c.trigger})`]);
-      valCtrl=lab('Chọn Lệnh Bot Kích Hoạt:','')
-        +`<select onchange="S('${p}action.value',this.value);pick('${k}')">
-          <option value="">— Chọn lệnh —</option>
-          ${cmdOpts.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
-        </select>`;
+      } else if(curType==='quickcreate'){
+        ctrl=lab('Cấu Hình Tạo Nhanh (tên:mã_pin:thời_lượng):','')
+          +inp(ap+'value',{ph:'auto:Aistv2026:5h'})
+          +`<div class="chips" style="margin-top:4px">
+            <span class="chip" onclick="S('${ap}value','auto:Aistv2026:5h');${syncAct};pick('${k}')">Aistv2026 5h</span>
+            <span class="chip" onclick="S('${ap}value','auto:random:5h');${syncAct};pick('${k}')">Random 5h</span>
+            <span class="chip" onclick="S('${ap}value','auto:Admin8888:3h');${syncAct};pick('${k}')">Admin8888 3h</span>
+          </div>`;
 
-    } else if(bt.action.type==='link'){
-      valCtrl=lab('Đường Dẫn URL:','')
-        +inp(p+'action.value',{ph:'http://127.0.0.1:8080 hoặc https://...'})
-        +`<div class="chips" style="margin-top:4px">
-          <span class="chip" onclick="S('${p}action.value','http://127.0.0.1:8080');pick('${k}')">Web 8080</span>
-          <span class="chip" onclick="S('${p}action.value','https://github.com/${esc(T.config?.runnerRepo||'')}');pick('${k}')">Runner Repo</span>
-          <span class="chip" onclick="S('${p}action.value','https://github.com/${esc(T.config?.storageRepo||'')}');pick('${k}')">Storage Repo</span>
-        </div>`;
+      } else if(curType==='cmd'){
+        const cmdOpts=T.commands.map(c=>[c.id,`⌨️ ${c.name} (${c.trigger})`]);
+        ctrl=lab('Chọn Lệnh Bot Kích Hoạt:','')
+          +`<select onchange="S('${ap}value',this.value);${syncAct};pick('${k}')">
+            <option value="">— Chọn lệnh —</option>
+            ${cmdOpts.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
+          </select>`;
 
-    } else {
-      valCtrl=`<div class="mu" style="margin-top:6px;padding:6px;background:#1e1e30;border-radius:6px">ℹ️ Hành động này tự động thực thi ngay khi người dùng bấm nút trong Discord.</div>`;
+      } else if(curType==='link'){
+        ctrl=lab('Đường Dẫn URL:','')
+          +inp(ap+'value',{ph:'http://127.0.0.1:8080 hoặc https://...'})
+          +`<div class="chips" style="margin-top:4px">
+            <span class="chip" onclick="S('${ap}value','http://127.0.0.1:8080');${syncAct};pick('${k}')">Web 8080</span>
+            <span class="chip" onclick="S('${ap}value','https://github.com/${esc(T.config?.runnerRepo||'')}');${syncAct};pick('${k}')">Runner Repo</span>
+            <span class="chip" onclick="S('${ap}value','https://github.com/${esc(T.config?.storageRepo||'')}');${syncAct};pick('${k}')">Storage Repo</span>
+          </div>`;
+
+      } else {
+        ctrl=`<div class="mu" style="margin-top:6px;padding:6px;background:#1e1e30;border-radius:6px">ℹ️ Tiến trình này tự động thực thi khi người dùng bấm nút trong Discord.</div>`;
+      }
+
+      return `<div style="background:#161626;border:1px solid #2e2e48;border-radius:8px;padding:10px;margin-top:8px">
+        <div class="r" style="justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:12px;font-weight:bold;color:#38bdf8">⚡ Tiến trình #${ai+1}: ${esc((actTypes.find(x=>x[0]===curType)||[])[1]||curType)}</span>
+          <div class="r">
+            ${ai>0?`<button class="s sm" title="Lên trên" type="button" onclick="mvBtnAction(${r},${c},${ai},-1)">▲</button>`:''}
+            ${ai<bt.actions.length-1?`<button class="s sm" title="Xuống dưới" type="button" onclick="mvBtnAction(${r},${c},${ai},1)">▼</button>`:''}
+            ${bt.actions.length>1?`<button class="d sm" title="Xóa tiến trình" type="button" onclick="rmBtnAction(${r},${c},${ai})">🗑</button>`:''}
+          </div>
+        </div>
+        ${lab('Chọn loại hành động:','')}
+        <select onchange="S('${ap}type',this.value);if(this.value=='menu')S('${ap}value','${T.menus[0]?.id||''}');else if(this.value=='panel')S('${ap}value','mgr');else if(this.value=='vm')S('${ap}value','start');else if(this.value=='set_dur')S('${ap}value','5h00m');else if(this.value=='set_pin')S('${ap}value','Aistv2026');else if(this.value=='nav')S('${ap}value','prev');${syncAct};pick('${k}')">
+          ${actTypes.map(([v,t])=>`<option value="${v}" ${curType==v?'selected':''}>${t}</option>`).join('')}
+        </select>
+        ${ctrl}
+      </div>`;
     }
+
+    const curCond=bt.condition||'always';
+    const isCustomCond=curCond==='custom'||curCond.includes('{')||curCond.includes('==')||curCond.includes('!=')||curCond.includes('>');
 
     h=`<div class="r" style="justify-content:space-between;margin-bottom:8px">
       <b>🔘 Nút [Hàng ${+r+1}, Nút ${+c+1}]</b>
@@ -522,16 +571,103 @@ function inspector(){
     </div>`
     +lab('Kiểu nút (Màu sắc Discord)','')
     +`<div>${Object.keys(BST).map(s=>`<span class="pill ${bt.style==s?'on':''}" style="background:${BST[s]}" onclick="S('${p}style','${s}');pick('${k}')">${({primary:'Chính (Xanh)',secondary:'Phụ (Xám)',success:'Xanh lá',danger:'Đỏ',link:'Link'})[s]}</span>`).join('')}</div>`
-    +lab('Hành động khi người dùng bấm nút:','')
-    +`<select onchange="S('${p}action.type',this.value);if(this.value=='menu')S('${p}action.value','${T.menus[0]?.id||''}');else if(this.value=='panel')S('${p}action.value','mgr');else if(this.value=='vm')S('${p}action.value','start');else if(this.value=='set_dur')S('${p}action.value','5h00m');else if(this.value=='set_pin')S('${p}action.value','Aistv2026');else if(this.value=='nav')S('${p}action.value','prev');pick('${k}')">${actTypes.map(([v,t])=>`<option value="${v}" ${bt.action.type==v?'selected':''}>${t}</option>`).join('')}</select>`
-    +valCtrl
-    +`<div style="margin-top:8px;border-top:1px solid var(--bd);padding-top:8px">
+
+    // --- MỤC 1: ĐIỀU KIỆN HIỂN THỊ NÚT BẤM (CONDITIONAL VISIBILITY) ---
+    +`<div style="margin-top:10px;padding:10px;background:#18182e;border:1px solid #3730a3;border-radius:8px">
+      <div class="r" style="margin-bottom:4px"><b style="color:#a5b4fc">🎯 ĐIỀU KIỆN HIỂN THỊ NÚT BẤM</b></div>
+      ${lab('Hiện nút khi nào:','')}
+      <select onchange="if(this.value=='custom'){S('${p}condition','custom');if(!'${esc(bt.conditionExpr||'')}')S('${p}conditionExpr','{onlineCount} > 0');}else{S('${p}condition',this.value);}pick('${k}')">
+        ${condOpts.map(([cv,cl])=>`<option value="${cv}" ${(isCustomCond&&cv==='custom')||(!isCustomCond&&curCond===cv)?'selected':''}>${cl}</option>`).join('')}
+      </select>
+      ${isCustomCond?`
+        <div style="margin-top:6px">
+          ${lab('Biểu thức điều kiện ({biến} == ... hoặc >):','')}
+          ${inp(p+'conditionExpr',{ph:'VD: {onlineCount} > 0 hoặc {curStatusBadge} == 🟢 Online'})}
+          <div class="chips" style="margin-top:4px">
+            <span class="chip" onclick="S('${p}conditionExpr','{onlineCount} > 0');S('${p}condition','custom');pick('${k}')">{onlineCount} &gt; 0</span>
+            <span class="chip" onclick="S('${p}conditionExpr','{offlineCount} > 0');S('${p}condition','custom');pick('${k}')">{offlineCount} &gt; 0</span>
+            <span class="chip" onclick="S('${p}conditionExpr','{totalCount} > 0');S('${p}condition','custom');pick('${k}')">{totalCount} &gt; 0</span>
+            <span class="chip" onclick="S('${p}conditionExpr','{curGvId} != (Chờ mở máy / Đang cấp)');S('${p}condition','custom');pick('${k}')">Có ID GameViewer</span>
+          </div>
+        </div>
+      `:''}
+    </div>`
+
+    // --- MỤC 2: CHUỖI TIẾN TRÌNH THỰC THI (MULTI-ACTION PIPELINE) ---
+    +`<div style="margin-top:10px;padding:10px;background:#121220;border:1px solid #2e2e48;border-radius:8px">
+      <div class="r" style="justify-content:space-between;margin-bottom:4px">
+        <b style="color:#38bdf8">⚡ TIẾN TRÌNH THỰC THI (${bt.actions.length} bước)</b>
+      </div>
+      <div class="mu" style="margin-bottom:6px">Một nút có thể kích hoạt nhiều hành động nối tiếp theo thứ tự:</div>
+      ${bt.actions.map((act,ai)=>renderActionCtrl(act,ai)).join('')}
+      <button class="g sm" type="button" style="width:100%;margin-top:10px;padding:8px" onclick="addBtnAction(${r},${c})">➕ Thêm tiến trình nối tiếp cho nút này</button>
+    </div>`
+
+    // --- MỤC 3: CÀI ĐẶT BỔ SUNG ---
+    +`<div style="margin-top:10px;border-top:1px solid var(--bd);padding-top:8px">
       ${chk(p+'ephemeral','Chỉ người bấm thấy phản hồi (Bảng ẩn Ephemeral)')}
       ${chk(p+'disabled','Vô hiệu hóa nút (Disabled mờ không bấm được)')}
+      ${chk(p+'ownerOnly','Chỉ chủ menu (người gọi lệnh) mới bấm được nút này')}
     </div>`
     +ptxt();
   }
   return h;
+}
+
+// Thao tác chuỗi tiến trình đa tác vụ (Multi-Action Pipeline)
+function addBtnAction(r,c){
+  const bt=T.menus[MI]?.rows?.[r]?.[c];if(!bt)return;
+  bt.actions=Array.isArray(bt.actions)&&bt.actions.length?bt.actions:[bt.action||{type:'panel',value:'mgr'}];
+  bt.actions.push({type:'refresh',value:''});
+  bt.action=bt.actions[0];
+  dirty(true);pick(`b:${r}:${c}`);toast('✔ Đã thêm tiến trình nối tiếp #'+bt.actions.length);
+}
+function rmBtnAction(r,c,ai){
+  const bt=T.menus[MI]?.rows?.[r]?.[c];if(!bt||!bt.actions||bt.actions.length<=1)return toast('Cần ít nhất 1 tiến trình');
+  bt.actions.splice(ai,1);
+  bt.action=bt.actions[0];
+  dirty(true);pick(`b:${r}:${c}`);toast('🗑 Đã xóa tiến trình');
+}
+function mvBtnAction(r,c,ai,dir){
+  const bt=T.menus[MI]?.rows?.[r]?.[c];if(!bt||!bt.actions)return;
+  const target=ai+dir;if(target<0||target>=bt.actions.length)return;
+  [bt.actions[ai],bt.actions[target]]=[bt.actions[target],bt.actions[ai]];
+  bt.action=bt.actions[0];
+  dirty(true);pick(`b:${r}:${c}`);
+}
+function openMenuById(mid){
+  const idx=T.menus.findIndex(x=>x.id===mid);
+  if(idx>=0){MI=idx;SEL={k:'embed'};dirty(true);draw();toast('🗂 Đang xem & chỉnh sửa menu: '+T.menus[idx].name)}
+  else toast('Không tìm thấy menu: '+mid);
+}
+function createAndLinkMenu(r,c,ai){
+  const newId='menu_'+Date.now().toString(36).slice(-4);
+  const newName='Menu phụ ('+newId+')';
+  T.menus.push({
+    id:newId,
+    name:newName,
+    ownerOnly:false,
+    content:'',
+    embed:{
+      enabled:true,
+      color:'#5865f2',
+      title:'🎮 '+newName.toUpperCase(),
+      description:'Nội dung menu mới. Hãy chỉnh sửa theo ý bạn!'
+    },
+    rows:[
+      [
+        {label:'🔙 Quay Lại',emoji:'🔙',style:'secondary',action:{type:'menu',value:T.menus[MI]?.id||'main'}},
+        {label:'❌ Đóng',emoji:'❌',style:'danger',action:{type:'panel',value:'close'}}
+      ]
+    ]
+  });
+  const bt=T.menus[MI]?.rows?.[r]?.[c];
+  if(bt){
+    if(!Array.isArray(bt.actions))bt.actions=[bt.action||{type:'menu',value:newId}];
+    if(bt.actions[ai])bt.actions[ai].value=newId;
+    bt.action=bt.actions[0];
+  }
+  dirty(true);draw();toast('🎉 Đã tạo menu mới và liên kết thành công!');
 }
 
 // Thao tác nút & hàng nút
