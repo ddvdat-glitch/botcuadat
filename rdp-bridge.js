@@ -669,17 +669,20 @@ const origCreateServer = http.createServer;
                   // 2.1 API LẤY TOÀN BỘ CẤU HÌNH LỆNH, MENU VÀ MÁY ẢO CHO WEB TU TIÊN (/api/rdp/full)
                   if (u === '/api/rdp/full' && req.method === 'GET') {
                     if (!checkAuth(req, body)) return sendJson(401, { ok: false, error: 'Sai mật khẩu Admin' });
-                    let rdpData = null;
-                    let roles = {};
-                    let channels = {};
-                    try {
-                      if (fs.existsSync(DATA_PATH)) {
-                        const d = JSON.parse(fs.readFileSync(DATA_PATH, 'utf8'));
-                        rdpData = d.rdp;
-                        roles = d.roles || {};
-                        channels = d.channels || {};
-                      }
-                    } catch {}
+                    const liveDb = (botCtx && typeof botCtx.db === 'function') ? botCtx.db() : null;
+                    let rdpData = (liveDb && liveDb.rdp) || null;
+                    let roles = (liveDb && liveDb.roles) || {};
+                    let channels = (liveDb && liveDb.channels) || {};
+                    if (!rdpData) {
+                      try {
+                        if (fs.existsSync(DATA_PATH)) {
+                          const d = JSON.parse(fs.readFileSync(DATA_PATH, 'utf8'));
+                          rdpData = d.rdp;
+                          roles = d.roles || roles;
+                          channels = d.channels || channels;
+                        }
+                      } catch {}
+                    }
                     if (!rdpData) rdpData = loadBridgeState();
                     return sendJson(200, { ok: true, rdp: rdpData, roles, channels, botReady: true });
                   }
@@ -688,6 +691,14 @@ const origCreateServer = http.createServer;
                   if (u === '/api/rdp/full' && req.method === 'PUT') {
                     if (!checkAuth(req, body)) return sendJson(401, { ok: false, error: 'Sai mật khẩu Admin' });
                     const newRdp = body || {};
+                    // Cập nhật trực tiếp vào RAM của bot ngay lập tức
+                    if (botCtx && typeof botCtx.db === 'function') {
+                      const liveDb = botCtx.db();
+                      liveDb.rdp = Object.assign(liveDb.rdp || {}, newRdp);
+                      if (typeof botCtx.saveNow === 'function') {
+                        try { botCtx.saveNow(); } catch {}
+                      }
+                    }
                     try {
                       if (fs.existsSync(DATA_PATH)) {
                         const d = JSON.parse(fs.readFileSync(DATA_PATH, 'utf8'));
@@ -1924,7 +1935,7 @@ async function syncAllMachinesWithGithub() {
 async function onMessage(msg) {
   if (msg.author.bot) return false;
   const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
-  const rdp = d.rdp;
+  const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
   if (!rdp || !Array.isArray(rdp.commands)) return false;
 
   const text = (msg.content || '').trim();
@@ -2059,6 +2070,21 @@ async function onMessage(msg) {
 
     return true;
   }
+
+  // 2. NẾU LÀ CÁC LỆNH GỌI MENU / BẢNG ĐIỀU KHIỂN (kể cả !maymenu, !may menu, !may ds, !ds, !may, !rdp)
+  // mà không khớp lệnh con nào cụ thể ở trên -> TỰ ĐỘNG HIỂN THỊ MENU CHÍNH ĐÃ THIẾT KẾ TỪ WEB!
+  if (/^!(may|maymenu|ds|rdp)\b/i.test(text) || text.toLowerCase() === '!ds') {
+    const uid = msg.author.id;
+    const mainCmd = rdp.commands.find(c => c.type === 'menu') || { name: 'Bảng điều khiển máy ảo', menu: 'main' };
+    const menu = (rdp.menus || []).find(m => m.id === (mainCmd.menu || 'main')) || (rdp.menus && rdp.menus[0]);
+    if (menu) {
+      const vars = getRdpVars(uid, { title: mainCmd.name });
+      const payload = buildRdpPayload(menu, vars, uid);
+      await msg.reply(payload).catch(() => msg.channel.send(payload).catch(() => {}));
+      return true; // ĐÃ XỬ LÝ XONG, TUYỆT ĐỐI KHÔNG ĐỂ SCRIPT CŨ CHẠY ĐÈ!
+    }
+  }
+
   return false;
 }
 
@@ -2067,7 +2093,7 @@ async function onButton(i) {
   const D = require('discord.js');
   const [, mid, ri, ci, owner] = i.customId.split(':');
   const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
-  const rdp = d.rdp;
+  const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
   if (!rdp || !Array.isArray(rdp.menus)) {
     return i.reply({ content: '⚠️ Menu này chưa được cấu hình.', flags: D.MessageFlags.Ephemeral });
   }

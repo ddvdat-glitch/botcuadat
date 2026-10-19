@@ -291,7 +291,7 @@
     {
       "id": "may_rdp",
       "name": "Quản lý máy GameViewer & StarDesk (!may)",
-      "enabled": true,
+      "enabled": false,
       "language": "javascript",
       "trigger": "^!(may|thongtin|rdp)\\b",
       "matchType": "regex",
@@ -1533,8 +1533,8 @@
       {
         "id": "may_dashboard",
         "name": "Bảng điều khiển máy ảo (!may)",
-        "trigger": "!may",
-        "matchType": "exact",
+        "trigger": "^!(may|maymenu|ds)(\\\\s+(menu|ds|dashboard))?$",
+        "matchType": "regex",
         "type": "menu",
         "menu": "main",
         "cooldown": 3,
@@ -1598,7 +1598,7 @@
         "id": "may_scan",
         "name": "Quét & Nâng cấp YML (!may scan)",
         "trigger": "!may scan",
-        "matchType": "exact",
+        "matchType": "startsWith",
         "type": "scan",
         "menu": "main",
         "cooldown": 10,
