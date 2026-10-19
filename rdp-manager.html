@@ -817,14 +817,14 @@ function tCreate(){
 }
 
 async function submitCreateVm(){
-  const name=$('cr_name').value.trim();
-  const displayName=$('cr_disp').value.trim()||('Máy '+name);
-  const duration=$('cr_dur').value.trim();
-  const pin=$('cr_pin').value.trim();
-  const runnerRepo=$('cr_run').value.trim();
-  const storageRepo=$('cr_sto').value.trim();
-  const ownerId=$('cr_own').value.trim();
-  if(!name)return alert('Vui lòng nhập tên định danh!');
+  let name=$('cr_name').value.trim();
+  if(!name){
+    const vms = Object.keys(data.rdp?.machines || {});
+    let autoNum = 1;
+    while(vms.includes('may-' + autoNum)) autoNum++;
+    name = 'may-' + autoNum;
+    $('cr_name').value = name;
+  }
   if(!pin||pin.length<8)return alert('Mã PIN tối thiểu 8 ký tự!');
 
   $('cr_st').textContent='⏳ Đang tạo file workflow và kích hoạt job...';

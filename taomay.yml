@@ -1214,6 +1214,115 @@ jobs:
               Write-Host "│ ✅ Đã mở StarDesk: $sdAppExe" -ForegroundColor Green;
           }
 
+          # ----------------- 2.5. THIẾT LẬP TỶ LỆ MÀN HÌNH 1920x1080 (FULL HD) -----------------
+          Write-Host "│ 🖥️ Đang thiết lập tỷ lệ màn hình 1920x1080 (Full HD) chống lỗi popup cài đặt..." -ForegroundColor Cyan;
+          $setResCode = @'
+try {
+    # 1. Gọi lệnh native Set-DisplayResolution trên Windows Server
+    if (Get-Command Set-DisplayResolution -ErrorAction SilentlyContinue) {
+        Set-DisplayResolution -Width 1920 -Height 1080 -Force -ErrorAction SilentlyContinue;
+    }
+
+    # 2. Cấu hình Registry DefaultSettings 1920x1080
+    Get-ChildItem -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Video' -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -eq '0000' } | ForEach-Object {
+        Set-ItemProperty -Path $_.PSPath -Name 'DefaultSettings.XResolution' -Value 1920 -Type DWord -Force -ErrorAction SilentlyContinue;
+        Set-ItemProperty -Path $_.PSPath -Name 'DefaultSettings.YResolution' -Value 1080 -Type DWord -Force -ErrorAction SilentlyContinue;
+    };
+    Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name 'LogPixels' -Value 96 -Type DWord -Force -ErrorAction SilentlyContinue;
+    Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name 'Win8DpiScaling' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue;
+
+    # 3. Áp dụng P/Invoke ChangeDisplaySettings trực tiếp vào Display Driver (không hiện popup xác nhận)
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+public struct DEVMODE {
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+    public short dmSpecVersion; public short dmDriverVersion; public short dmSize; public short dmDriverExtra;
+    public int dmFields; public int dmPositionX; public int dmPositionY; public int dmDisplayOrientation;
+    public int dmDisplayFixedOutput; public short dmColor; public short dmDuplex; public short dmYResolution;
+    public short dmTTOption; public short dmCollate;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+    public short dmLogPixels; public short dmBitsPerPel; public int dmPelsWidth; public int dmPelsHeight;
+    public int dmDisplayFlags; public int dmDisplayFrequency; public int dmICMMethod; public int dmICMIntent;
+    public int dmMediaType; public int dmDitherType; public int dmReserved1; public int dmReserved2;
+    public int dmPanningWidth; public int dmPanningHeight;
+}
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+public struct DISPLAY_DEVICE {
+    [MarshalAs(UnmanagedType.U4)] public int cb;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+    [MarshalAs(UnmanagedType.U4)] public int StateFlags;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+}
+
+public class ResControl {
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int EnumDisplaySettings(string deviceName, int modeNum, ref DEVMODE devMode);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int ChangeDisplaySettings(ref DEVMODE devMode, int flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int ChangeDisplaySettingsEx(string lpszDeviceName, ref DEVMODE lpDevMode, IntPtr hwnd, int dwflags, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern int EnumDisplayDevices(string lpDevice, uint iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, uint dwFlags);
+
+    public const int ENUM_CURRENT_SETTINGS = -1;
+    public const int CDS_UPDATEREGISTRY = 0x01;
+    public const int CDS_GLOBAL = 0x08;
+
+    public static void Set1080p() {
+        DEVMODE dm = new DEVMODE();
+        dm.dmSize = (short)Marshal.SizeOf(dm);
+        if (EnumDisplaySettings(null, ENUM_CURRENT_SETTINGS, ref dm) != 0) {
+            dm.dmPelsWidth = 1920;
+            dm.dmPelsHeight = 1080;
+            dm.dmFields |= (0x00080000 | 0x00100000);
+            ChangeDisplaySettings(ref dm, CDS_UPDATEREGISTRY | CDS_GLOBAL);
+            ChangeDisplaySettings(ref dm, 0);
+        }
+
+        DISPLAY_DEVICE d = new DISPLAY_DEVICE();
+        d.cb = Marshal.SizeOf(d);
+        for (uint id = 0; EnumDisplayDevices(null, id, ref d, 0) != 0; id++) {
+            if ((d.StateFlags & 1) != 0) {
+                DEVMODE devMode = new DEVMODE();
+                devMode.dmSize = (short)Marshal.SizeOf(devMode);
+                if (EnumDisplaySettings(d.DeviceName, ENUM_CURRENT_SETTINGS, ref devMode) != 0) {
+                    devMode.dmPelsWidth = 1920;
+                    devMode.dmPelsHeight = 1080;
+                    devMode.dmFields |= (0x00080000 | 0x00100000);
+                    ChangeDisplaySettingsEx(d.DeviceName, ref devMode, IntPtr.Zero, CDS_UPDATEREGISTRY | CDS_GLOBAL, IntPtr.Zero);
+                    ChangeDisplaySettingsEx(d.DeviceName, ref devMode, IntPtr.Zero, 0, IntPtr.Zero);
+                }
+            }
+            d.cb = Marshal.SizeOf(d);
+        }
+    }
+}
+"@ -ErrorAction SilentlyContinue
+    [ResControl]::Set1080p();
+} catch {}
+'@;
+
+          $resScriptPath = 'C:\set-1080p.ps1';
+          Set-Content -Path "$resScriptPath" -Value "$setResCode" -Encoding UTF8 -Force;
+          Set-Content -Path 'C:\set-1080p.bat' -Value "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\set-1080p.ps1`r`necho [OK] Da chuyen do phan giai sang 1920x1080!" -Encoding UTF8 -Force;
+
+          # Thực thi ngay lập tức
+          & "$resScriptPath" 2>$null;
+          try {
+              & schtasks.exe /Create /TN "AISTV-Set-1080p" /TR "powershell.exe -ExecutionPolicy Bypass -File C:\set-1080p.ps1" /SC ONCE /ST 00:00 /RU "$user" /RL HIGHEST /IT /F *> $null;
+              & schtasks.exe /Run /TN "AISTV-Set-1080p" *> $null;
+          } catch {}
+          Write-Host "│ ✅ Đã cấu hình độ phân giải 1920x1080 (Full HD) không popup xác nhận!" -ForegroundColor Green;
+
           # ----------------- 3. THIẾT LẬP MÃ PIN & LẤY ID GAMEVIEWER -----------------
           Write-Host "│ ⏳ Đang đợi GameViewer kết nối dịch vụ & máy chủ NetEase..." -ForegroundColor Cyan;
           for ($i = 0; $i -lt 15; $i++) {
@@ -1386,25 +1495,14 @@ jobs:
                   $lnk1.TargetPath = "$($env:MOUNT_LETTER):\";
                   $lnk1.Save();
 
-                  $lnk2 = $ws.CreateShortcut("$d\AISTV-SHARED.lnk");
-                  $lnk2.TargetPath = "$env:SHARED_DATA_DIR";
-                  $lnk2.Save();
-
-                  if (Test-Path 'C:\Program Files\Netease\GameViewer\bin\GameViewer.exe') {
-                      $lnkGv = $ws.CreateShortcut("$d\GameViewer.lnk");
-                      $lnkGv.TargetPath = 'C:\Program Files\Netease\GameViewer\bin\GameViewer.exe';
-                      $lnkGv.Save();
-                  }
-
-                  if (Test-Path 'C:\Program Files\StarDesk\StarDesk.exe') {
-                      $lnkSd = $ws.CreateShortcut("$d\StarDesk.lnk");
-                      $lnkSd.TargetPath = 'C:\Program Files\StarDesk\StarDesk.exe';
-                      $lnkSd.Save();
-                  }
-
                   $lnk3 = $ws.CreateShortcut("$d\WEB-QUAN-LY-RDP.url");
                   $lnk3.TargetPath = "http://127.0.0.1:$($env:WEB_PORT)/";
                   $lnk3.Save();
+
+                  $lnkRes = $ws.CreateShortcut("$d\SET-1920x1080-FULL-HD.lnk");
+                  $lnkRes.TargetPath = "C:\set-1080p.bat";
+                  $lnkRes.Description = "Cấu hình màn hình 1920x1080 (Full HD)";
+                  $lnkRes.Save();
               };
               Write-Host "│ ✅ Đã tạo đầy đủ Shortcut GameViewer, StarDesk & ổ đĩa trên Desktop User gốc" -ForegroundColor Green;
           } catch {}

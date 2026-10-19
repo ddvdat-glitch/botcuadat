@@ -1,3 +1,26 @@
+function getNextMachineId(st, preferredName) {
+  const machines = (st && st.machines) || {};
+  if (preferredName) {
+    const clean = String(preferredName).toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+    if (clean && !machines[clean]) return clean;
+    if (clean) {
+      for (let i = 2; i <= 99; i++) {
+        const candidate = `${clean}-${i}`;
+        if (!machines[candidate]) return candidate;
+      }
+    }
+  }
+  for (let i = 1; i <= 99; i++) {
+    const candidate = `may-${i}`;
+    if (!machines[candidate]) return candidate;
+  }
+  return `may-${Date.now().toString(36).slice(-4)}`;
+}
+
           // ================= RDP BRIDGE, FILE RECEIVER & MULTI-GIT WEB MANAGER =================
           const fs = require('fs');
           const path = require('path');
@@ -186,32 +209,40 @@ function ghRequest(method, repo, endpoint, body, customToken) {
 }
 
 function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
-                    let out = tpl;
-                    out = out.replace(/^name:\s*.*$/m, `name: máy ${name}`);
-                    out = out.replace(/default:\s*'may-phu-2'/g, `default: '${name}'`);
-                    out = out.replace(/default:\s*'Máy Phụ 2'/g, `default: 'Máy ${name}'`);
-                    out = out.replace(/group:\s*stardesk-[^\r\n]+/g, `group: stardesk-${name}`);
-                    out = out.replace(/MACHINE_ID:\s*\${{[^}]+}}/g, `MACHINE_ID: '${name}'`);
-                    out = out.replace(/DISPLAY_NAME:\s*\${{[^}]+}}/g, `DISPLAY_NAME: 'Máy ${name}'`);
+  let out = tpl;
+  const cleanId = String(name || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || 'may-1';
+  const dispName = `Máy ${cleanId.toUpperCase()}`;
 
-                    if (storageRepo) {
-                      out = out.replace(/default:\s*'ddvdat-glitch\/rdp'/g, `default: '${storageRepo}'`);
-                      out = out.replace(/STORAGE_REPO:\s*\${{[^}]+}}/g, `STORAGE_REPO: '${storageRepo}'`);
-                    }
+  out = out.replace(/^name:\s*.*$/m, `name: máy ${cleanId}`);
+  out = out.replace(/(machine_id:[\s\S]*?default:\s*)['"][^'"]*['"]/i, `$1'${cleanId}'`);
+  out = out.replace(/(display_name:[\s\S]*?default:\s*)['"][^'"]*['"]/i, `$1'${dispName}'`);
+  out = out.replace(/default:\s*'may-phu-2'/g, `default: '${cleanId}'`);
+  out = out.replace(/default:\s*'Máy Phụ 2'/g, `default: '${dispName}'`);
+  out = out.replace(/group:\s*stardesk-[^\r\n]+/g, `group: stardesk-${cleanId}`);
+  out = out.replace(/MACHINE_ID:\s*.*$/m, `      MACHINE_ID: '${cleanId}'`);
+  out = out.replace(/DISPLAY_NAME:\s*.*$/m, `      DISPLAY_NAME: '${dispName}'`);
 
-                    if (duration) {
-                      const durVal = normalizeDuration(duration);
-                      out = out.replace(/(duration:[\s\S]*?default:\s*)'[0-9a-z]+'/i, `$1'${durVal}'`);
-                    }
+  if (storageRepo) {
+    out = out.replace(/(storage_repo:[\s\S]*?default:\s*)['"][^'"]*['"]/i, `$1'${storageRepo}'`);
+    out = out.replace(/default:\s*'ddvdat-glitch\/rdp'/g, `default: '${storageRepo}'`);
+    out = out.replace(/STORAGE_REPO:\s*.*$/m, `      STORAGE_REPO: '${storageRepo}'`);
+  }
 
-                    if (pin) {
-                      const cleanPin = pin.replace(/[^A-Za-z0-9]/g, '');
-                      out = out.replace(/(pin_code:[\s\S]*?default:\s*)'[A-Za-z0-9@_.-]+'/i, `$1'${cleanPin}'`);
-                      out = out.replace(/(fixed_password:[\s\S]*?default:\s*)'[A-Za-z0-9@_.-]+'/i, `$1'${cleanPin}'`);
-                    }
+  const durVal = normalizeDuration(duration);
+  out = out.replace(/(duration:[\s\S]*?default:\s*)'[0-9a-z]+'/i, `$1'${durVal}'`);
 
-                    return out;
-                  }
+  if (pin) {
+    const cleanPin = pin.replace(/[^A-Za-z0-9]/g, '');
+    out = out.replace(/(pin_code:[\s\S]*?default:\s*)'[A-Za-z0-9@_.-]+'/i, `$1'${cleanPin}'`);
+    out = out.replace(/(fixed_password:[\s\S]*?default:\s*)'[A-Za-z0-9@_.-]+'/i, `$1'${cleanPin}'`);
+  }
+
+  return out;
+}
 
                   async function dispatchWorkflow(runnerRepo, wfFile, inputs = {}, token) {
   const safeInputs = { ...(inputs || {}) };
@@ -1025,7 +1056,8 @@ function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
                           const pinM = rawYml.match(/(?:pin_code|fixed_password):[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
                           const storageM = rawYml.match(/storage_repo:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
 
-                          const mId = (idM && idM[1]) || f.name.replace(/\.(ya?ml)$/i, '');
+                          const fileBaseId = f.name.replace(/\.(ya?ml)$/i, '').toLowerCase();
+      const mId = fileBaseId;
                           const dName = (nameM && nameM[1]) || `Máy ${mId}`;
                           const dur = (durM && durM[1]) || '5h00m';
                           const pin = (pinM && pinM[1]) || 'Aistv2026';
@@ -1120,7 +1152,8 @@ function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
                           const durM = rawYml.match(/duration:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
                           const pinM = rawYml.match(/(?:pin_code|fixed_password):[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
 
-                          const mId = (idM && idM[1]) || f.name.replace(/\.(ya?ml)$/i, '');
+                          const fileBaseId = f.name.replace(/\.(ya?ml)$/i, '').toLowerCase();
+      const mId = fileBaseId;
                           const dur = (durM && durM[1]) || '5h00m';
                           const pin = (pinM && pinM[1]) || 'Aistv2026';
 
@@ -1921,14 +1954,15 @@ function buildRdpPayload(menu, vars, uid) {
 }
 
 // ----------------- TẠO MÁY WORKFLOW MỚI -----------------
-async function createMachineWorkflow(name, duration, pin, uid, displayName) {
+async function createMachineWorkflow(name, duration, pin, uid, displayName, ownerName) {
   const st = loadBridgeState();
   const cfg = getRdpConfig();
 
-  const cleanName = String(name || '').toLowerCase().replace(/[^a-z0-9\-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || `may-${Date.now().toString(36).slice(-4)}`;
+  const cleanName = getNextMachineId(st, name);
   const cleanPin = (pin ? String(pin).trim() : 'Aistv2026').replace(/[^A-Za-z0-9]/g, '') || 'Aistv2026';
   const cleanDur = normalizeDuration(duration);
-  const cleanDisplayName = displayName || `Máy ${cleanName}`;
+  const cleanDisplayName = displayName || `Máy ${cleanName.toUpperCase()}`;
+  const realOwner = ownerName || (displayName && !displayName.startsWith('Máy ') ? displayName : 'Admin');
 
   let tpl = loadTaomayTemplate();
   if (!tpl) {
@@ -1957,8 +1991,11 @@ async function createMachineWorkflow(name, duration, pin, uid, displayName) {
   await new Promise(r => setTimeout(r, 1500));
 
   await dispatchWorkflow(cfg.runnerRepo, `${cleanName}.yml`, {
+    machine_id: cleanName,
+    display_name: cleanDisplayName,
     duration: cleanDur,
-    pin_code: cleanPin
+    pin_code: cleanPin,
+    storage_repo: cfg.storageRepo
   }, cfg.token);
 
   st.machines = st.machines || {};
@@ -1968,7 +2005,7 @@ async function createMachineWorkflow(name, duration, pin, uid, displayName) {
     duration: cleanDur,
     gvPin: cleanPin,
     ownerId: uid || '',
-    owner: displayName || 'Admin',
+    owner: realOwner,
     storageRepo: cfg.storageRepo,
     repo: cfg.runnerRepo,
     status: 'in_progress',
@@ -1989,8 +2026,11 @@ async function restartMachineWorkflow(name) {
   await cancelWorkflowRuns(cfg.runnerRepo, `${name}.yml`, cfg.token);
   await new Promise(r => setTimeout(r, 2000));
   await dispatchWorkflow(cfg.runnerRepo, `${name}.yml`, {
+    machine_id: name,
+    display_name: (m && m.displayName) || `Máy ${String(name).toUpperCase()}`,
     duration: normalizeDuration(m && m.duration),
-    pin_code: (m && m.gvPin) || 'Aistv2026'
+    pin_code: (m && m.gvPin) || 'Aistv2026',
+    storage_repo: cfg.storageRepo
   }, cfg.token);
   if (m) {
     m.status = 'in_progress';
@@ -2158,7 +2198,8 @@ async function scanAndRebuildWorkflowsDirect(upgradeToLatest = false) {
       const pinM = rawYml.match(/(?:pin_code|fixed_password):[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
       const storageM = rawYml.match(/storage_repo:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
 
-      const mId = (idM && idM[1]) || f.name.replace(/\.(ya?ml)$/i, '');
+      const fileBaseId = f.name.replace(/\.(ya?ml)$/i, '').toLowerCase();
+      const mId = fileBaseId;
       const dName = (nameM && nameM[1]) || `Máy ${mId}`;
       const dur = (durM && durM[1]) || '5h00m';
       const pin = (pinM && pinM[1]) || 'Aistv2026';
@@ -2633,28 +2674,31 @@ async function onMessage(msg) {
 // ----------------- HIỂN THỊ MODAL TẠO MÁY ẢO -----------------
 async function showCreateMachineModal(i, uid) {
   const D = require('discord.js');
+  const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+  const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+
+  const autoDefaultName = getNextMachineId(rdp);
+
   const modal = new D.ModalBuilder()
     .setCustomId(`rdp:modal_create_submit:${uid}`)
     .setTitle('➕ TẠO MÁY ẢO GAMEVIEWER & STARDESK');
 
-  const autoDefaultName = `may-${Date.now().toString(36).slice(-4)}`;
-
   const nameInput = new D.TextInputBuilder()
     .setCustomId('vm_name')
-    .setLabel('Tên Định Danh Máy (Machine ID / Tên gợi nhớ)')
+    .setLabel('Tên Định Danh Máy (Để trống để tự động gán)')
     .setStyle(D.TextInputStyle.Short)
-    .setPlaceholder(`Ví dụ: ${autoDefaultName}, may-game, vm1...`)
+    .setPlaceholder(`Tự động gán: ${autoDefaultName}`)
     .setValue(autoDefaultName)
-    .setRequired(true)
+    .setRequired(false)
     .setMaxLength(32);
 
   const pinInput = new D.TextInputBuilder()
     .setCustomId('vm_pin')
-    .setLabel('Mã PIN GameViewer (8-16 ký tự chữ & số)')
+    .setLabel('Mã PIN GameViewer (Mặc định: Aistv2026)')
     .setStyle(D.TextInputStyle.Short)
     .setPlaceholder('Mặc định: Aistv2026')
     .setValue('Aistv2026')
-    .setRequired(true)
+    .setRequired(false)
     .setMinLength(8)
     .setMaxLength(16);
 
@@ -2687,25 +2731,27 @@ async function handleModalCreateSubmit(i, uid) {
   const rawPin = i.fields.getTextInputValue('vm_pin');
   const rawDur = i.fields.getTextInputValue('vm_dur') || '5h00m';
 
-  const cleanName = String(rawName || '').toLowerCase().replace(/[^a-z0-9\-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || `may-${Date.now().toString(36).slice(-4)}`;
-  const cleanPin = (rawPin || 'Aistv2026').replace(/[^A-Za-z0-9]/g, '') || 'Aistv2026';
-  const cleanDur = normalizeDuration(rawDur);
-
   const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
   const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+
+  const cleanName = getNextMachineId(rdp, rawName);
+  const cleanPin = (rawPin ? String(rawPin).trim() : 'Aistv2026').replace(/[^A-Za-z0-9]/g, '') || 'Aistv2026';
+  const cleanDur = normalizeDuration(rawDur);
+  const cleanDisplayName = `Máy ${cleanName.toUpperCase()}`;
+  const ownerName = i.member?.displayName || i.user.username;
+
   const cfg = getRdpConfig();
 
   if (!cfg.token) {
     return await i.editReply({
-      content: `❌ **CHƯA CẤU HÌNH GITHUB PAT TOKEN!**\n• Để tạo file workflow và kích hoạt Actions, bot cần GitHub Personal Access Token (PAT) có quyền \`repo\` & \`workflow\`.\n• **Cách 1 (Nhanh nhất):** Admin chat lệnh sau trong Discord:\n  \`!may token <token_pat_của_bạn>\` *(bot sẽ xóa tin nhắn ngay lập tức để bảo mật)*.\n• **Cách 2:** Mở Web Quản Lý (Tab ⚙️ Cài Đặt) điền vào ô **PAT Token** rồi bấm Lưu.`
-    }).catch(() => {});
+      content: `⚠️ **CHƯA CẤU HÌNH GITHUB PAT TOKEN!**\n  Để tạo file workflow và kích hoạt Actions, bot cần GitHub Personal Access Token (PAT) có quyền \`repo\` & \`workflow\`.\n  **Cách 1 (Nhanh nhất):** Admin chat lệnh sau trong Discord:\n  \`!may token <token_pat_của_bạn>\` *(bot sẽ xóa tin nhắn ngay lập tức để bảo mật)*.\n  **Cách 2:** Mở Web Quản Lý (Tab ⚙️ Cài Đặt) điền vào ô **PAT Token** rồi bấm Lưu.`
+    });
   }
 
   try {
-    await i.editReply({ content: `⏳ Đang khởi tạo máy **${cleanName.toUpperCase()}** (${cleanDur}) với PIN \`${cleanPin}\` trên GitHub Actions...` });
-    await createMachineWorkflow(cleanName, cleanDur, cleanPin, uid, i.member?.displayName || i.user.username);
-
-    rdp.selectedVm = rdp.selectedVm || {};
+    await i.editReply({ content: `⏳ Đang khởi tạo máy **${cleanDisplayName}** (${cleanDur}) với PIN \`${cleanPin}\` trên GitHub Actions...` });
+    await createMachineWorkflow(cleanName, cleanDur, cleanPin, uid, cleanDisplayName, ownerName);
+rdp.selectedVm = rdp.selectedVm || {};
     rdp.selectedVm[uid] = cleanName;
     saveBridgeState(rdp);
 
@@ -3066,6 +3112,7 @@ async function onButton(i) {
 }
 
 module.exports = {
+  getNextMachineId,
   init,
   onMessage,
   onButton,
