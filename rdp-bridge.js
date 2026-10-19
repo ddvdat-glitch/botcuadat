@@ -36,14 +36,22 @@ const https = require('https');
           if (!fs.existsSync(FILES_DIR)) try { fs.mkdirSync(FILES_DIR, { recursive: true }); } catch {}
 
           function loadBridgeState() {
-            try {
-              if (fs.existsSync(BRIDGE_FILE)) return JSON.parse(fs.readFileSync(BRIDGE_FILE, 'utf8'));
-            } catch {}
+            if (botCtx && typeof botCtx.db === 'function') {
+              try {
+                const d = botCtx.db();
+                const r = d && (d.rdp || (d.shared && d.shared.rdp));
+                if (r) return r;
+              } catch {}
+            }
             try {
               if (fs.existsSync(DATA_PATH)) {
                 const d = JSON.parse(fs.readFileSync(DATA_PATH, 'utf8'));
-                if (d && d.shared && d.shared.rdp) return d.shared.rdp;
+                const r = d && (d.rdp || (d.shared && d.shared.rdp));
+                if (r) return r;
               }
+            } catch {}
+            try {
+              if (fs.existsSync(BRIDGE_FILE)) return JSON.parse(fs.readFileSync(BRIDGE_FILE, 'utf8'));
             } catch {}
             return { accounts: {}, machines: {}, duckdns: {}, sessions: {}, files: [] };
           }
@@ -52,11 +60,27 @@ const https = require('https');
             try {
               fs.writeFileSync(BRIDGE_FILE, JSON.stringify(rdpObj, null, 2), 'utf8');
             } catch {}
+
+            // Cập nhật ngay vào bộ nhớ botCtx nếu bot đang chạy
+            if (botCtx && typeof botCtx.db === 'function') {
+              try {
+                const d = botCtx.db();
+                if (d) {
+                  d.rdp = Object.assign(d.rdp || {}, rdpObj);
+                  d.shared = d.shared || {};
+                  d.shared.rdp = d.rdp;
+                  if (typeof botCtx.saveNow === 'function') botCtx.saveNow();
+                  else if (typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
+                }
+              } catch {}
+            }
+
             try {
               if (fs.existsSync(DATA_PATH)) {
                 const d = JSON.parse(fs.readFileSync(DATA_PATH, 'utf8'));
+                d.rdp = Object.assign(d.rdp || {}, rdpObj);
                 d.shared = d.shared || {};
-                d.shared.rdp = Object.assign(d.shared.rdp || {}, rdpObj);
+                d.shared.rdp = d.rdp;
                 fs.writeFileSync(DATA_PATH, JSON.stringify(d, null, 2), 'utf8');
               }
             } catch {}
@@ -118,6 +142,10 @@ function getRdpConfig() {
   const rootAdmin = (cfg.rootAdmin && String(cfg.rootAdmin).trim()) || '946662197168341053';
   const allowedUsers = Array.isArray(cfg.allowedUsers) && cfg.allowedUsers.length ? cfg.allowedUsers : ['946662197168341053'];
   const allowedRoles = Array.isArray(cfg.allowedRoles) ? cfg.allowedRoles : [];
+  const maxMachinesPerUser = (cfg.maxMachinesPerUser != null && !isNaN(Number(cfg.maxMachinesPerUser)))
+    ? Number(cfg.maxMachinesPerUser)
+    : 2;
+
   return {
     ...cfg,
     storageRepo,
@@ -127,8 +155,28 @@ function getRdpConfig() {
     token,
     rootAdmin,
     allowedUsers,
-    allowedRoles
+    allowedRoles,
+    maxMachinesPerUser
   };
+}
+
+function checkUserMachineQuota(rdpState, uid, cfg) {
+  const isRoot = isRootAdmin(uid, cfg.rootAdmin);
+  if (isRoot) return { ok: true };
+  const allM = (rdpState && rdpState.machines) || {};
+  const userVms = Object.values(allM).filter(m => m.ownerId === uid);
+  const userLimit = (rdpState.userLimits && rdpState.userLimits[uid]) || cfg.maxMachinesPerUser || 2;
+  if (userVms.length >= userLimit) {
+    const listNames = userVms.map(m => `**${(m.displayName || m.name).toUpperCase()}**`).join(', ');
+    return {
+      ok: false,
+      count: userVms.length,
+      limit: userLimit,
+      vms: userVms,
+      error: `⛔ **BẠN ĐÃ ĐẠT GIỚI HẠN SỞ HỮU MÁY ẢO (${userVms.length}/${userLimit})!**\n• Mỗi thành viên chỉ được phép sở hữu tối đa **${userLimit} máy ảo**.\n• Máy hiện tại của bạn: ${listNames || 'Không có'}.\n• Vui lòng xóa bớt máy cũ (\`!may xoa <tên>\`) hoặc liên hệ Admin (<@${cfg.rootAdmin}>) để được nâng giới hạn!`
+    };
+  }
+  return { ok: true, count: userVms.length, limit: userLimit };
 }
 
 function ghRequest(method, repo, endpoint, body, customToken) {
@@ -225,7 +273,7 @@ function ghRequest(method, repo, endpoint, body, customToken) {
   return '5h00m';
 }
 
-function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
+function buildVmWorkflow(tpl, name, duration, pin, storageRepo, ownerId, ownerName) {
   let out = tpl;
   const cleanId = String(name || '').toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -233,6 +281,16 @@ function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '') || 'may-1';
   const dispName = `Máy ${cleanId.toUpperCase()}`;
+  const realOwnerId = String(ownerId || '').trim();
+  const realOwnerName = String(ownerName || '').trim();
+
+  // Nhúng metadata định danh chủ sở hữu máy để không bao giờ bị mất gán khi scan lại từ GitHub
+  const headerMeta = `# MACHINE_METADATA:\n# OWNER_ID: ${realOwnerId}\n# OWNER_NAME: ${realOwnerName}\n`;
+  if (!out.startsWith('# MACHINE_METADATA')) {
+    out = headerMeta + out;
+  } else {
+    out = out.replace(/^# MACHINE_METADATA:[\s\S]*?# OWNER_NAME:[^\r\n]*\r?\n?/m, headerMeta);
+  }
 
   out = out.replace(/^name:\s*.*$/m, `name: máy ${cleanId}`);
   out = out.replace(/(machine_id:[\s\S]*?default:\s*)['"][^'"]*['"]/i, `$1'${cleanId}'`);
@@ -242,6 +300,21 @@ function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
   out = out.replace(/group:\s*stardesk-[^\r\n]+/g, `group: stardesk-${cleanId}`);
   out = out.replace(/^[ \t]*MACHINE_ID:\s*.*$/m, `      MACHINE_ID: '${cleanId}'`);
   out = out.replace(/^[ \t]*DISPLAY_NAME:\s*.*$/m, `      DISPLAY_NAME: '${dispName}'`);
+
+  if (realOwnerId) {
+    if (out.includes('OWNER_ID:')) {
+      out = out.replace(/^[ \t]*OWNER_ID:\s*.*$/m, `      OWNER_ID: '${realOwnerId}'`);
+    } else {
+      out = out.replace(/(^[ \t]*DISPLAY_NAME:\s*.*$)/m, `$1\n      OWNER_ID: '${realOwnerId}'`);
+    }
+  }
+  if (realOwnerName) {
+    if (out.includes('OWNER_NAME:')) {
+      out = out.replace(/^[ \t]*OWNER_NAME:\s*.*$/m, `      OWNER_NAME: '${realOwnerName}'`);
+    } else {
+      out = out.replace(/(^[ \t]*DISPLAY_NAME:\s*.*$)/m, `$1\n      OWNER_NAME: '${realOwnerName}'`);
+    }
+  }
 
   if (storageRepo) {
     out = out.replace(/(storage_repo:[\s\S]*?default:\s*)['"][^'"]*['"]/i, `$1'${storageRepo}'`);
@@ -1061,7 +1134,8 @@ const origCreateServer = http.createServer;
                           const dur = (durM && durM[1]) || '5h00m';
                           const pin = (pinM && pinM[1]) || 'Aistv2026';
 
-                          const newContent = buildVmWorkflow(tpl, mId, dur, pin, cfg.storageRepo);
+                          const curM = st.machines && st.machines[mId];
+                          const newContent = buildVmWorkflow(tpl, mId, dur, pin, cfg.storageRepo, curM?.ownerId, curM?.owner);
                           const b64 = Buffer.from(newContent, 'utf8').toString('base64');
                           await ghRequest('PUT', cfg.runnerRepo, `/contents/${f.path}`, {
                             message: `[AISTV] Tự động nâng cấp workflow máy ${mId} (GameViewer 4.43.1 + StarDesk 1.5.3 + DPAPI)`,
@@ -1102,6 +1176,13 @@ const origCreateServer = http.createServer;
                     const runnerRepo = String(body.runnerRepo || cfg.runnerRepo).trim();
                     const storageRepo = String(body.storageRepo || cfg.storageRepo).trim();
 
+                    const realOwnerId = String(body.ownerId || cfg.rootAdmin || '').trim();
+                    const realOwnerName = String(body.ownerName || (realOwnerId === cfg.rootAdmin ? 'Root Admin' : `<@${realOwnerId}>`)).trim();
+
+                    // Khóa giới hạn: Kiểm tra quota sở hữu máy của user
+                    const quota = checkUserMachineQuota(st, realOwnerId, cfg);
+                    if (!quota.ok) return sendJson(400, { ok: false, error: quota.error });
+
                     let tpl = loadTaomayTemplate();
                     if (!tpl) {
                       try {
@@ -1111,7 +1192,7 @@ const origCreateServer = http.createServer;
                     }
                     if (!tpl) return sendJson(400, { ok: false, error: 'Không tìm thấy file mẫu taomay.yml' });
 
-                    const wfContent = buildVmWorkflow(tpl, cleanName, duration, pin, storageRepo);
+                    const wfContent = buildVmWorkflow(tpl, cleanName, duration, pin, storageRepo, realOwnerId, realOwnerName);
                     const b64 = Buffer.from(wfContent, 'utf8').toString('base64');
                     const wfPath = `.github/workflows/${cleanName}.yml`;
 
@@ -1123,7 +1204,7 @@ const origCreateServer = http.createServer;
                       } catch {}
 
                       await ghRequest('PUT', runnerRepo, `/contents/${wfPath}`, {
-                        message: `[AISTV] Khởi tạo máy ảo ${cleanName} trên Runner Repo`,
+                        message: `[AISTV] Khởi tạo máy ảo ${cleanName} trên Runner Repo (Chủ: ${realOwnerName})`,
                         content: b64,
                         sha
                       }, cfg.token);
@@ -1135,7 +1216,9 @@ const origCreateServer = http.createServer;
                           display_name: displayName,
                           duration,
                           pin_code: pin,
-                          storage_repo: storageRepo
+                          storage_repo: storageRepo,
+                          owner_id: realOwnerId,
+                          owner_name: realOwnerName
                         }, cfg.runnerToken || cfg.token);
                       } catch (err) {
                         if (String(err.message || '').includes("workflow_dispatch")) {
@@ -1144,7 +1227,9 @@ const origCreateServer = http.createServer;
                             display_name: displayName,
                             duration,
                             pin_code: pin,
-                            storage_repo: storageRepo
+                            storage_repo: storageRepo,
+                            owner_id: realOwnerId,
+                            owner_name: realOwnerName
                           }, cfg.runnerToken || cfg.token);
                         } else {
                           throw err;
@@ -1159,13 +1244,15 @@ const origCreateServer = http.createServer;
                         gvPin: pin,
                         storageRepo,
                         repo: runnerRepo,
-                        ownerId: String(body.ownerId || '').trim(),
-                        owner: String(body.ownerName || body.ownerId || '').trim(),
+                        ownerId: realOwnerId,
+                        owner: realOwnerName,
                         status: 'in_progress',
                         isOnline: false,
                         isLatestTemplate: true,
                         created: Date.now()
                       };
+                      st.selectedVm = st.selectedVm || {};
+                      st.selectedVm[realOwnerId] = cleanName;
                       saveBridgeState(st);
                       return sendJson(200, { ok: true, machine: cleanName, message: `Đã tạo máy [${displayName}] thành công!` });
                     } catch (err) {
@@ -1223,6 +1310,7 @@ const origCreateServer = http.createServer;
                   if (u === '/api/rdp/edit-vm' && req.method === 'POST') {
                     if (!checkAuth(req, body)) return sendJson(401, { ok: false, error: 'Sai mật khẩu Admin' });
                     const st = loadBridgeState();
+                    const cfg = getRdpConfig();
                     const mId = String(body.machine || '').trim().toLowerCase();
                     if (!mId || !st.machines || !st.machines[mId]) return sendJson(404, { ok: false, error: 'Không tìm thấy máy' });
 
@@ -1234,12 +1322,30 @@ const origCreateServer = http.createServer;
                     if (body.duration) cur.duration = String(body.duration).trim();
                     if (body.storageRepo) cur.storageRepo = String(body.storageRepo).trim();
 
+                    // Cập nhật lại workflow trên GitHub Runner Repo để nhúng OWNER metadata
+                    try {
+                      let tpl = loadTaomayTemplate();
+                      if (tpl) {
+                        const newContent = buildVmWorkflow(tpl, mId, cur.duration || '5h00m', cur.gvPin || 'Aistv2026', cur.storageRepo || cfg.storageRepo, cur.ownerId, cur.owner);
+                        const curF = await ghRequest('GET', cfg.runnerRepo, `/contents/.github/workflows/${mId}.yml`, null, cfg.token);
+                        if (curF && curF.sha) {
+                          await ghRequest('PUT', cfg.runnerRepo, `/contents/.github/workflows/${mId}.yml`, {
+                            message: `[AISTV] Gán chủ sở hữu máy ${mId} cho ${cur.owner || cur.ownerId}`,
+                            content: Buffer.from(newContent, 'utf8').toString('base64'),
+                            sha: curF.sha
+                          }, cfg.token);
+                        }
+                      }
+                    } catch (e) {
+                      console.error('Lỗi cập nhật workflow khi gán chủ:', e.message);
+                    }
+
                     saveBridgeState(st);
                     return sendJson(200, { ok: true, data: cur });
                   }
 
                   // --------------------------------------------------------------------------
-                  // 5.6 API: LƯU CẤU HÌNH HỆ THỐNG (2 REPO, TOKEN, ADMIN ID)
+                  // 5.6 API: LƯU CẤU HÌNH HỆ THỐNG (2 REPO, TOKEN, ADMIN ID, QUOTA)
                   // --------------------------------------------------------------------------
                   if (u === '/api/rdp/save-system-config' && req.method === 'POST') {
                     if (!checkAuth(req, body)) return sendJson(401, { ok: false, error: 'Sai mật khẩu Admin' });
@@ -1249,6 +1355,7 @@ const origCreateServer = http.createServer;
                     if (body.runnerRepo) st.config.runnerRepo = String(body.runnerRepo).trim();
                     if (body.token) st.config.token = String(body.token).trim();
                     if (body.rootAdmin) st.config.rootAdmin = String(body.rootAdmin).trim();
+                    if (body.maxMachinesPerUser !== undefined) st.config.maxMachinesPerUser = Number(body.maxMachinesPerUser) || 2;
                     saveBridgeState(st);
                     return sendJson(200, { ok: true, config: st.config });
                   }
@@ -1663,17 +1770,24 @@ function getRdpVars(uid, extraVars = {}) {
     const icon = isOnline ? '🟢' : (m.status === 'in_progress' ? '⏳' : '🔴');
     const idText = m.gvId ? `\`${m.gvId}\`` : '*(Chờ cấp ID)*';
     const pinText = rdp.pinMasked !== false ? '`••••••••`' : `\`${m.gvPin || 'Aistv2026'}\``;
-    const durText = m.remainSec != null ? `Còn: **${hms(m.remainSec)}**` : `Thời lượng: **${m.duration || '5h'}**`;
-    cards.push(`• ${icon} **${(m.displayName || m.name || k).toUpperCase()}** │ 🆔 ID: ${idText} │ 🔑 PIN: ${pinText} │ ⏰ ${durText}`);
+    const ownerText = m.ownerId ? (m.ownerId === cfg.rootAdmin ? '👑 Admin' : `<@${m.ownerId}>`) : 'Chưa gán';
+    cards.push(`• ${icon} **${(m.displayName || m.name || k).toUpperCase()}** │ 🆔 ID: ${idText} │ 🔑 PIN: ${pinText} │ 👤 Chủ: ${ownerText} │ ⏰ ${durText}`);
   }
 
   const curKey = (rdp.selectedVm && rdp.selectedVm[uid]) || myMachineKeys[0] || (isRoot ? Object.keys(allMachines)[0] : '') || '';
   const curM = allMachines[curKey] || {};
 
+  const userLimit = (rdp.userLimits && rdp.userLimits[uid]) || cfg.maxMachinesPerUser || 2;
+  const userVmCount = Object.values(allMachines).filter(m => m.ownerId === uid).length;
+  const userQuota = isRoot ? '∞ (Root Admin)' : `${userVmCount}/${userLimit} máy`;
+
   const vars = {
     onlineCount,
     offlineCount,
     totalCount: myMachineKeys.length,
+    userQuota,
+    userVmCount,
+    maxMachines: isRoot ? '∞' : userLimit,
     runnerRepo: cfg.runnerRepo,
     storageRepo: cfg.storageRepo,
     machineList: cards.length ? cards.join('\n') : '*(Bạn chưa sở hữu máy ảo nào. Hãy bấm ➕ Tạo Máy Mới để bắt đầu!)*',
@@ -1877,11 +1991,18 @@ async function createMachineWorkflow(name, duration, pin, uid, displayName, owne
   const st = loadBridgeState();
   const cfg = getRdpConfig();
 
+  // Khóa giới hạn tạo máy: Kiểm tra quota mỗi user
+  const quota = checkUserMachineQuota(st, uid, cfg);
+  if (!quota.ok) {
+    throw new Error(quota.error);
+  }
+
   const cleanName = getNextMachineId(st, name);
   const cleanPin = (pin ? String(pin).trim() : 'Aistv2026').replace(/[^A-Za-z0-9]/g, '') || 'Aistv2026';
   const cleanDur = normalizeDuration(duration);
   const cleanDisplayName = displayName || `Máy ${cleanName.toUpperCase()}`;
-  const realOwner = ownerName || (displayName && !displayName.startsWith('Máy ') ? displayName : 'Admin');
+  const realOwnerId = String(uid || cfg.rootAdmin).trim();
+  const realOwner = ownerName || (displayName && !displayName.startsWith('Máy ') ? displayName : (realOwnerId === cfg.rootAdmin ? 'Root Admin' : `<@${realOwnerId}>`));
 
   let tpl = loadTaomayTemplate();
   if (!tpl) {
@@ -1892,7 +2013,7 @@ async function createMachineWorkflow(name, duration, pin, uid, displayName, owne
   }
   if (!tpl) throw new Error('Không tìm thấy file mẫu taomay.yml');
 
-  const wfContent = buildVmWorkflow(tpl, cleanName, cleanDur, cleanPin, cfg.storageRepo);
+  const wfContent = buildVmWorkflow(tpl, cleanName, cleanDur, cleanPin, cfg.storageRepo, realOwnerId, realOwner);
   const filePath = `.github/workflows/${cleanName}.yml`;
 
   let sha = undefined;
@@ -1902,7 +2023,7 @@ async function createMachineWorkflow(name, duration, pin, uid, displayName, owne
   } catch {}
 
   await ghRequest('PUT', cfg.runnerRepo, `/contents/${filePath}`, {
-    message: `[AISTV] Tạo máy ảo ${cleanName} (${cleanDur}, PIN: ${cleanPin})`,
+    message: `[AISTV] Tạo máy ảo ${cleanName} (${cleanDur}, PIN: ${cleanPin}, Chủ: ${realOwner})`,
     content: Buffer.from(wfContent, 'utf8').toString('base64'),
     sha
   }, cfg.token);
@@ -1915,7 +2036,9 @@ async function createMachineWorkflow(name, duration, pin, uid, displayName, owne
       display_name: cleanDisplayName,
       duration: cleanDur,
       pin_code: cleanPin,
-      storage_repo: cfg.storageRepo
+      storage_repo: cfg.storageRepo,
+      owner_id: realOwnerId,
+      owner_name: realOwner
     }, cfg.runnerToken || cfg.token);
   } catch (err) {
     if (String(err.message || '').includes("workflow_dispatch")) {
@@ -1924,7 +2047,9 @@ async function createMachineWorkflow(name, duration, pin, uid, displayName, owne
         display_name: cleanDisplayName,
         duration: cleanDur,
         pin_code: cleanPin,
-        storage_repo: cfg.storageRepo
+        storage_repo: cfg.storageRepo,
+        owner_id: realOwnerId,
+        owner_name: realOwner
       }, cfg.runnerToken || cfg.token);
     } else {
       throw err;
@@ -1937,7 +2062,7 @@ async function createMachineWorkflow(name, duration, pin, uid, displayName, owne
     displayName: cleanDisplayName,
     duration: cleanDur,
     gvPin: cleanPin,
-    ownerId: uid || '',
+    ownerId: realOwnerId,
     owner: realOwner,
     storageRepo: cfg.storageRepo,
     repo: cfg.runnerRepo,
@@ -1947,6 +2072,8 @@ async function createMachineWorkflow(name, duration, pin, uid, displayName, owne
     created: Date.now(),
     startedAt: Date.now()
   };
+  st.selectedVm = st.selectedVm || {};
+  st.selectedVm[realOwnerId] = cleanName;
   saveBridgeState(st);
   return st.machines[cleanName];
 }
@@ -2130,6 +2257,8 @@ async function scanAndRebuildWorkflowsDirect(upgradeToLatest = false) {
       const durM = rawYml.match(/duration:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
       const pinM = rawYml.match(/(?:pin_code|fixed_password):[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
       const storageM = rawYml.match(/storage_repo:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+      const ownerIdM = rawYml.match(/#\s*OWNER_ID:\s*([0-9]{16,21})/i) || rawYml.match(/OWNER_ID:\s*['"]?([0-9]{16,21})['"]?/i);
+      const ownerNameM = rawYml.match(/#\s*OWNER_NAME:\s*([^\r\n]+)/i) || rawYml.match(/OWNER_NAME:\s*['"]?([^'"\r\n]+)['"]?/i);
 
       const fileBaseId = f.name.replace(/\.(ya?ml)$/i, '').toLowerCase();
       const mId = fileBaseId;
@@ -2137,6 +2266,8 @@ async function scanAndRebuildWorkflowsDirect(upgradeToLatest = false) {
       const dur = (durM && durM[1]) || '5h00m';
       const pin = (pinM && pinM[1]) || 'Aistv2026';
       const stRepo = (storageM && storageM[1]) || cfg.storageRepo;
+      const foundOwnerId = (ownerIdM && ownerIdM[1]) || '';
+      const foundOwnerName = (ownerNameM && ownerNameM[1].trim()) || '';
 
       const isLatest = rawYml.includes('uuyc_4.43.1.exe') && rawYml.includes('ProtectedData::Protect') && rawYml.includes('StarDesk_1.5.3.exe');
 
@@ -2149,8 +2280,16 @@ async function scanAndRebuildWorkflowsDirect(upgradeToLatest = false) {
       cur.repo = cfg.runnerRepo;
       cur.isLatestTemplate = isLatest;
 
+      // Tự động gán ID và tên người sở hữu từ workflow nếu chưa có
+      if (!cur.ownerId && foundOwnerId) cur.ownerId = foundOwnerId;
+      if (!cur.owner && foundOwnerName) cur.owner = foundOwnerName;
+      if (!cur.ownerId) {
+        cur.ownerId = cfg.rootAdmin;
+        cur.owner = 'Root Admin';
+      }
+
       if (upgradeToLatest && tpl && !isLatest) {
-        const newContent = buildVmWorkflow(tpl, mId, dur, pin, stRepo);
+        const newContent = buildVmWorkflow(tpl, mId, dur, pin, stRepo, cur.ownerId, cur.owner);
         await ghRequest('PUT', cfg.runnerRepo, `/contents/${f.path}`, {
           message: `[AISTV] Tự động nâng cấp workflow máy ${mId} (GameViewer 4.43.1 + StarDesk 1.5.3 + DPAPI)`,
           content: Buffer.from(newContent, 'utf8').toString('base64'),
@@ -2241,6 +2380,8 @@ async function syncAllMachinesWithGithub() {
         if (stateObj.gameviewerPin || stateObj.gvPin) m.gvPin = stateObj.gameviewerPin || stateObj.gvPin;
         if (stateObj.stardeskId) m.stardeskId = stateObj.stardeskId;
         if (stateObj.duration) m.duration = stateObj.duration;
+        if (stateObj.ownerId && !m.ownerId) m.ownerId = stateObj.ownerId;
+        if (stateObj.owner && !m.owner) m.owner = stateObj.owner;
         if (stateObj.status) {
           if (stateObj.status.toLowerCase() === 'online') m.isOnline = true;
           else if (stateObj.status.toLowerCase() === 'stopped') m.isOnline = false;
@@ -2478,6 +2619,169 @@ async function onMessage(msg) {
     return true;
   }
 
+  // 1d. LỆNH GÁN / CHUYỂN QUYỀN SỞ HỮU MÁY ẢO CHO USER KHÁC
+  if (lower.startsWith('!may gan') || lower.startsWith('!may transfer') || lower.startsWith('!may chonguoi')) {
+    const args = text.replace(/^!may\s+(gan|transfer|chonguoi)\s*/i, '').trim().split(/\s+/).filter(Boolean);
+    const mName = (args[0] || '').toLowerCase();
+    const targetUserRaw = args[1] || '';
+
+    if (!mName || !targetUserRaw) {
+      await msg.reply('⚠️ Cú pháp: `!may gan <tên_máy> <@user hoặc UserID>`\nVí dụ: `!may gan may-1 @Member` hoặc `!may gan may-1 946662197168341053`').catch(() => {});
+      return true;
+    }
+
+    const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+    const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+    const m = (rdp.machines || {})[mName];
+
+    if (!m) {
+      await msg.reply(`❌ Không tìm thấy máy ảo có tên **${mName}** trong hệ thống!`).catch(() => {});
+      return true;
+    }
+
+    // Chỉ Root Admin hoặc chủ sở hữu hiện tại mới có quyền chuyển giao máy
+    if (!isRootAdmin(uid, cfg.rootAdmin) && m.ownerId !== uid) {
+      await msg.reply('🚫 Bạn không có quyền chuyển nhượng máy này vì không phải chủ sở hữu hay Root Admin!').catch(() => {});
+      return true;
+    }
+
+    const targetUid = targetUserRaw.replace(/[^0-9]/g, '');
+    if (!targetUid || targetUid.length < 16) {
+      await msg.reply('⚠️ User ID người nhận không hợp lệ! Vui lòng tag (@user) hoặc nhập dãy ID Discord của họ.').catch(() => {});
+      return true;
+    }
+
+    // Kiểm tra quota người nhận
+    const targetQuota = checkUserMachineQuota(rdp, targetUid, cfg);
+    if (!targetQuota.ok) {
+      await msg.reply(`⛔ **KHÔNG THỂ GÁN MÁY CHO <@${targetUid}>!**\n• Người nhận đã đạt giới hạn tối đa (${targetQuota.count}/${targetQuota.limit} máy).\n• Hãy yêu cầu họ xóa bớt máy cũ hoặc liên hệ Root Admin nâng giới hạn!`).catch(() => {});
+      return true;
+    }
+
+    const oldOwner = m.owner || (m.ownerId ? `<@${m.ownerId}>` : 'Chưa gán');
+    m.ownerId = targetUid;
+    m.owner = `<@${targetUid}>`;
+    rdp.selectedVm = rdp.selectedVm || {};
+    rdp.selectedVm[targetUid] = mName;
+    saveBridgeState(rdp);
+    if (botCtx && typeof botCtx.saveNow === 'function') botCtx.saveNow();
+
+    // Cập nhật lại workflow trên GitHub để lưu vĩnh viễn metadata OWNER
+    let wfUpdated = false;
+    try {
+      let tpl = loadTaomayTemplate();
+      if (tpl) {
+        const newYml = buildVmWorkflow(tpl, mName, m.duration || '5h00m', m.gvPin || 'Aistv2026', m.storageRepo || cfg.storageRepo, targetUid, `<@${targetUid}>`);
+        const curF = await ghRequest('GET', cfg.runnerRepo, `/contents/.github/workflows/${mName}.yml`, null, cfg.token);
+        if (curF && curF.sha) {
+          await ghRequest('PUT', cfg.runnerRepo, `/contents/.github/workflows/${mName}.yml`, {
+            message: `[AISTV] Chuyển quyền sở hữu máy ${mName} sang user ${targetUid}`,
+            content: Buffer.from(newYml, 'utf8').toString('base64'),
+            sha: curF.sha
+          }, cfg.token);
+          wfUpdated = true;
+        }
+      }
+    } catch (e) {
+      console.error('Lỗi cập nhật workflow khi gán chủ:', e.message);
+    }
+
+    await msg.reply(`🎉 **ĐÃ CHUYỂN GIAO MÁY [${(m.displayName || mName).toUpperCase()}] THÀNH CÔNG!**\n• Chủ cũ: ${oldOwner}\n• Chủ mới: <@${targetUid}>\n• Số máy chủ mới đang sở hữu: **${targetQuota.count + 1}/${targetQuota.limit}**\n• Đồng bộ GitHub: ${wfUpdated ? '🟢 Đã lưu vào workflow metadata' : '🟡 Đã lưu vào Database'}`).catch(() => {});
+    return true;
+  }
+
+  // 1e. LỆNH CẤU HÌNH GIỚI HẠN TẠO MÁY (QUOTA LIMIT)
+  if (lower.startsWith('!may gioihan') || lower.startsWith('!may limit') || lower.startsWith('!may quota')) {
+    if (!isRootAdmin(uid, cfg.rootAdmin)) {
+      await msg.reply('🚫 Chỉ có Root Admin (`946662197168341053`) mới có quyền cài đặt giới hạn số lượng máy ảo!').catch(() => {});
+      return true;
+    }
+    const args = text.replace(/^!may\s+(gioihan|limit|quota)\s*/i, '').trim().split(/\s+/).filter(Boolean);
+    const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+    const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+    rdp.config = rdp.config || {};
+    rdp.userLimits = rdp.userLimits || {};
+
+    if (args.length === 0) {
+      const curGlobal = rdp.config.maxMachinesPerUser || cfg.maxMachinesPerUser || 2;
+      const customUsers = Object.entries(rdp.userLimits).map(([u, lim]) => `  • <@${u}>: **${lim} máy**`).join('\n') || '  *(Chưa có giới hạn riêng cho ai)*';
+      const rep = [
+        '📊 **THÔNG TIN GIỚI HẠN SỞ HỮU MÁY ẢO**',
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+        `• 🌐 **Giới hạn chung cho mỗi thành viên:** **${curGlobal} máy/người**`,
+        `• 👑 **Root Admin (<@${cfg.rootAdmin}>):** **Không giới hạn (∞)**`,
+        '',
+        '🎯 **Giới Hạn Tùy Chỉnh Riêng Cho Từng User:**',
+        customUsers,
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+        '💡 **Cách đổi giới hạn:**',
+        '  • Đổi giới hạn chung: `!may gioihan <số_máy>` (vd: `!may gioihan 1` hoặc `!may gioihan 2`)',
+        '  • Đổi giới hạn riêng cho 1 user: `!may gioihan @user <số_máy>` (vd: `!may gioihan @Member 3`)'
+      ].join('\n');
+      await msg.reply(rep).catch(() => {});
+      return true;
+    }
+
+    if (args.length === 1 && !isNaN(Number(args[0]))) {
+      const newLimit = Math.max(1, Math.min(20, parseInt(args[0], 10)));
+      rdp.config.maxMachinesPerUser = newLimit;
+      saveBridgeState(rdp);
+      if (botCtx && typeof botCtx.saveNow === 'function') botCtx.saveNow();
+      await msg.reply(`✅ **ĐÃ CẬP NHẬT GIỚI HẠN TẠO MÁY CHUNG:** Mỗi người dùng thông thường được tạo tối đa **${newLimit} máy**!`).catch(() => {});
+      return true;
+    }
+
+    const targetUid = args[0].replace(/[^0-9]/g, '');
+    const userLimitNum = parseInt(args[1], 10);
+    if (!targetUid || isNaN(userLimitNum) || userLimitNum < 1) {
+      await msg.reply('⚠️ Cú pháp: `!may gioihan <@user hoặc UserID> <số_máy>`\nVí dụ: `!may gioihan @Member 3`').catch(() => {});
+      return true;
+    }
+
+    rdp.userLimits[targetUid] = userLimitNum;
+    saveBridgeState(rdp);
+    if (botCtx && typeof botCtx.saveNow === 'function') botCtx.saveNow();
+    await msg.reply(`✅ **ĐÃ CẤP GIỚI HẠN RIÊNG CHO <@${targetUid}>:** Được sở hữu tối đa **${userLimitNum} máy ảo**!`).catch(() => {});
+    return true;
+  }
+
+  // 1f. LỆNH LIỆT KÊ TOÀN BỘ MÁY ẢO & CHỦ SỞ HỮU
+  if (lower.startsWith('!may dsmay') || lower.startsWith('!may all') || lower === '!may ds' || lower.startsWith('!may list')) {
+    const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+    const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+    const allM = rdp.machines || {};
+    const keys = Object.keys(allM);
+
+    if (keys.length === 0) {
+      await msg.reply('⚠️ Hệ thống hiện chưa có máy ảo nào! Hãy gõ `!may tao` hoặc mở `!may` để khởi tạo máy đầu tiên.').catch(() => {});
+      return true;
+    }
+
+    const lines = [];
+    for (let idx = 0; idx < keys.length; idx++) {
+      const k = keys[idx];
+      const m = allM[k];
+      const isOnline = m.isOnline || m.status === 'in_progress';
+      const icon = isOnline ? '🟢' : (m.status === 'in_progress' ? '⏳' : '🔴');
+      const ownerText = m.ownerId ? (m.ownerId === cfg.rootAdmin ? '👑 Admin' : `<@${m.ownerId}>`) : (m.owner || 'Chưa gán');
+      const userQuotaInfo = m.ownerId ? checkUserMachineQuota(rdp, m.ownerId, cfg) : null;
+      const quotaBadge = userQuotaInfo ? `[${userQuotaInfo.count}/${userQuotaInfo.limit} máy]` : '';
+      const pinText = rdp.pinMasked !== false ? '••••••••' : (m.gvPin || 'Aistv2026');
+      lines.push(`${idx + 1}. ${icon} **${(m.displayName || m.name || k).toUpperCase()}** (\`${k}\`) │ 🆔 ID: \`${m.gvId || 'Chờ cấp'}\` │ 🔑 PIN: \`${pinText}\` │ 👤 Chủ: ${ownerText} ${quotaBadge}`);
+    }
+
+    const rep = [
+      '🖥️ **DANH SÁCH TOÀN BỘ MÁY ẢO TRÊN HỆ THỐNG**',
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      lines.join('\n'),
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      `• Tổng số máy: **${keys.length} máy** │ 🏃 Runner: \`${cfg.runnerRepo}\``,
+      `• Quản lý chi tiết: Gõ \`!may\` hoặc truy cập Web Dashboard!`
+    ].join('\n');
+    await msg.reply(rep).catch(() => {});
+    return true;
+  }
+
   // 2. KIỂM TRA PHÂN QUYỀN TRUY CẬP TỔNG THỂ CHO MỌI LỆNH !may / !ds / !rdp
   if (/^!(may|maymenu|ds|rdp)\b/i.test(text) || text.toLowerCase() === '!ds') {
     if (!isUserAllowed(uid, msg.member, cfg)) {
@@ -2535,6 +2839,13 @@ async function onMessage(msg) {
     }
 
     if (cmd.type === 'create') {
+      // Khóa giới hạn: Kiểm tra quota mỗi user
+      const quota = checkUserMachineQuota(rdp, uid, cfg);
+      if (!quota.ok) {
+        await msg.reply(quota.error).catch(() => {});
+        return true;
+      }
+
       const args = text.replace(/^[^\s]+\s*/, '').replace(/^(tao|create)\s*/i, '').trim().split(/\s+/).filter(Boolean);
       const nameArg = (args[0] || `may-${Date.now().toString(36).slice(-4)}`).toLowerCase().replace(/[^a-z0-9\-]/g, '');
       const durArg = args[1] || '5h';
@@ -2642,6 +2953,13 @@ async function showCreateMachineModal(i, uid) {
   const D = require('discord.js');
   const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
   const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+  const cfg = getRdpConfig();
+
+  // Khóa giới hạn: Kiểm tra quota trước khi hiển thị modal
+  const quota = checkUserMachineQuota(rdp, uid, cfg);
+  if (!quota.ok) {
+    return await i.reply({ content: quota.error, flags: D.MessageFlags.Ephemeral }).catch(() => {});
+  }
 
   const autoDefaultName = getNextMachineId(rdp);
 
@@ -2699,14 +3017,19 @@ async function handleModalCreateSubmit(i, uid) {
 
   const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
   const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+  const cfg = getRdpConfig();
+
+  // Khóa giới hạn: Kiểm tra quota khi gửi form modal
+  const quota = checkUserMachineQuota(rdp, uid, cfg);
+  if (!quota.ok) {
+    return await i.editReply({ content: quota.error });
+  }
 
   const cleanName = getNextMachineId(rdp, rawName);
   const cleanPin = (rawPin ? String(rawPin).trim() : 'Aistv2026').replace(/[^A-Za-z0-9]/g, '') || 'Aistv2026';
   const cleanDur = normalizeDuration(rawDur);
   const cleanDisplayName = `Máy ${cleanName.toUpperCase()}`;
   const ownerName = i.member?.displayName || i.user.username;
-
-  const cfg = getRdpConfig();
 
   if (!cfg.token) {
     return await i.editReply({
@@ -2903,6 +3226,11 @@ async function onButton(i) {
       }
 
       if (actType === 'quickcreate') {
+        const quota = checkUserMachineQuota(rdp, uid, cfg);
+        if (!quota.ok) {
+          explicitResponse = { content: quota.error, flags: D.MessageFlags.Ephemeral, components: [], embeds: [] };
+          break;
+        }
         const [qName, qPinVal, qDur] = (actVal || '').split(':');
         const finalPin = qPinVal === 'random' ? generateRandomPin() : qPinVal;
         await createMachineWorkflow(qName, qDur, finalPin, uid, i.member?.displayName || i.user.username);
@@ -2965,7 +3293,8 @@ async function onButton(i) {
           try {
             const tpl = loadTaomayTemplate();
             if (tpl) {
-              const newYml = buildVmWorkflow(tpl, curKey, rdp.machines[curKey].duration || '5h', pinVal, cfg.storageRepo);
+              const mObj = rdp.machines[curKey] || {};
+              const newYml = buildVmWorkflow(tpl, curKey, mObj.duration || '5h', pinVal, cfg.storageRepo, mObj.ownerId, mObj.owner);
               const curF = await ghRequest('GET', cfg.runnerRepo, `/contents/.github/workflows/${curKey}.yml`, null, cfg.token);
               if (curF && curF.sha) {
                 await ghRequest('PUT', cfg.runnerRepo, `/contents/.github/workflows/${curKey}.yml`, {

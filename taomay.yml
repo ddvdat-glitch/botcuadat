@@ -76,6 +76,16 @@ on:
         required: false
         default: true
         type: boolean
+      owner_id:
+        description: '🆔 Discord User ID chủ sở hữu máy'
+        required: false
+        default: '946662197168341053'
+        type: string
+      owner_name:
+        description: '👤 Tên người dùng Discord chủ sở hữu máy'
+        required: false
+        default: 'Root Admin'
+        type: string
 
 permissions:
   contents: write
@@ -101,6 +111,8 @@ jobs:
       MACHINE_ID: ${{ inputs.machine_id || 'may-phu-2' }}
       ROOT_MACHINE_ID: ${{ inputs.root_machine_id || 'may-goc' }}
       DISPLAY_NAME: ${{ inputs.display_name || inputs.machine_id || 'Máy Phụ 2' }}
+      OWNER_ID: ${{ inputs.owner_id || '946662197168341053' }}
+      OWNER_NAME: ${{ inputs.owner_name || 'Root Admin' }}
       DRIVE_LETTER: ${{ inputs.drive_letter || 'X' }}
       VHD_SIZE_GB: ${{ inputs.vhd_size_gb || '45' }}
       WEB_PORT: '8080'
@@ -500,6 +512,8 @@ jobs:
               '$stateObj = [ordered]@{',
               '    machineId       = "$cleanId";',
               '    displayName     = "$env:DISPLAY_NAME";',
+              '    ownerId         = "$env:OWNER_ID";',
+              '    owner           = "$env:OWNER_NAME";',
               '    status          = "$Status";',
               '    isOnline        = ($Status -eq "Online" -or $Status -eq "Running");',
               '    deviceId        = "$GvId";',
@@ -1459,6 +1473,22 @@ jobs:
                   $lnk1 = $ws.CreateShortcut("$d\O-DIA-RIENG-AISTV.lnk");
                   $lnk1.TargetPath = "$($env:MOUNT_LETTER):\";
                   $lnk1.Save();
+
+                  $lnk2 = $ws.CreateShortcut("$d\AISTV-SHARED.lnk");
+                  $lnk2.TargetPath = "$env:SHARED_DATA_DIR";
+                  $lnk2.Save();
+
+                  if (Test-Path 'C:\Program Files\Netease\GameViewer\bin\GameViewer.exe') {
+                      $lnkGv = $ws.CreateShortcut("$d\GameViewer.lnk");
+                      $lnkGv.TargetPath = 'C:\Program Files\Netease\GameViewer\bin\GameViewer.exe';
+                      $lnkGv.Save();
+                  }
+
+                  if (Test-Path 'C:\Program Files\StarDesk\StarDesk.exe') {
+                      $lnkSd = $ws.CreateShortcut("$d\StarDesk.lnk");
+                      $lnkSd.TargetPath = 'C:\Program Files\StarDesk\StarDesk.exe';
+                      $lnkSd.Save();
+                  }
 
                   $lnk3 = $ws.CreateShortcut("$d\WEB-QUAN-LY-RDP.url");
                   $lnk3.TargetPath = "http://127.0.0.1:$($env:WEB_PORT)/";

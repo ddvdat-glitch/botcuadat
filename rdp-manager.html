@@ -204,13 +204,14 @@ function tVms(){
           <div class="prop"><span class="l">Mã PIN:</span><span class="v"><code>${pinMask?'••••••••':esc(m.gvPin||'Aistv2026')}</code></span></div>
           <div class="prop"><span class="l">StarDesk ID:</span><span class="v"><code>${esc(m.stardeskId||'-')}</code></span></div>
           <div class="prop"><span class="l">Thời gian:</span><span class="v" style="color:#fbbf24">${esc(m.duration||'5h00m')}</span></div>
-          <div class="prop"><span class="l">Chủ sở hữu:</span><span class="v">${esc(m.owner||m.ownerId||'Chưa gán')}</span></div>
+          <div class="prop"><span class="l">Chủ sở hữu:</span><span class="v">${esc(m.owner||(m.ownerId?`<@${m.ownerId}>`:'Chưa gán'))}</span></div>
           <div class="r" style="margin-top:6px">
             <button class="g sm" onclick="vmControl('${m.name}','start')">▶️ Chạy</button>
             <button class="warn sm" onclick="vmControl('${m.name}','restart')">🔄 Khởi động</button>
             <button class="d sm" onclick="vmControl('${m.name}','stop')">🛑 Tắt</button>
             <button class="warn sm" onclick="vmControl('${m.name}','delete_disk')" title="Xóa ổ đĩa lưu trữ (VHDX Release) để reset ổ mới tinh">💽 Xóa Ổ</button>
             <button class="s sm" onclick="promptVm('${m.name}')">📝 Prompt</button>
+            <button class="s sm" onclick="changeVmOwner('${m.name}','${esc(m.ownerId||'')}')" title="Gán / Chuyển quyền sở hữu máy ảo cho User Discord khác">👤 Gán Chủ</button>
             <button class="d sm" onclick="vmControl('${m.name}','delete')" title="Xóa hoàn toàn máy ảo và ổ đĩa">🗑️</button>
           </div>
         </div>
@@ -234,6 +235,23 @@ async function promptVm(name){
     const r=await api('GET','/api/rdp/prompt?machine='+encodeURIComponent(name)+'&pass='+encodeURIComponent(pw));
     alert(r.prompt||'Chưa có auto-prompt cho máy '+name);
   }catch(e){alert('Lỗi: '+e.message)}
+}
+
+async function changeVmOwner(name, curOwnerId){
+  const newOwner = prompt('Nhập Discord User ID chủ sở hữu mới cho máy [' + name + ']:', curOwnerId || '');
+  if(newOwner === null) return;
+  const cleanUid = newOwner.trim().replace(/[^0-9]/g, '');
+  if(!cleanUid || cleanUid.length < 16) return alert('Discord User ID không hợp lệ (cần ít nhất 16 số)!');
+  toast('⏳ Đang cập nhật chủ sở hữu máy ' + name + '...');
+  try{
+    await api('POST', '/api/rdp/edit-vm?pass=' + encodeURIComponent(pw), {
+      machine: name,
+      ownerId: cleanUid,
+      ownerName: '<@' + cleanUid + '>'
+    });
+    toast('✔ Đã gán máy ' + name + ' cho user <@' + cleanUid + '>!');
+    await init();
+  }catch(e){ toast('❌ ' + e.message, 4000); }
 }
 
 // ================= TAB 2: QUẢN LÝ LỆNH (GIỐNG TU TIÊN) =================
@@ -819,13 +837,20 @@ function tCreate(){
 async function submitCreateVm(){
   let name=$('cr_name').value.trim();
   if(!name){
-    const vms = Object.keys(data.rdp?.machines || {});
+    const vms = Object.keys(T?.machines || {});
     let autoNum = 1;
     while(vms.includes('may-' + autoNum)) autoNum++;
     name = 'may-' + autoNum;
     $('cr_name').value = name;
   }
-  if(!pin||pin.length<8)return alert('Mã PIN tối thiểu 8 ký tự!');
+  const displayName = $('cr_disp').value.trim() || ('Máy ' + name.toUpperCase());
+  const duration = $('cr_dur').value.trim() || '5h00m';
+  const pin = $('cr_pin').value.trim() || 'Aistv2026';
+  const runnerRepo = $('cr_run').value.trim();
+  const storageRepo = $('cr_sto').value.trim();
+  const ownerId = $('cr_own').value.trim();
+
+  if(!pin || pin.length < 8) return alert('Mã PIN tối thiểu 8 ký tự!');
 
   $('cr_st').textContent='⏳ Đang tạo file workflow và kích hoạt job...';
   try{
@@ -844,6 +869,7 @@ function tSet(){
   <div class="hint">Chỉ có <b>Root Admin</b> (<code>946662197168341053</code>) và các User ID / Role được cấp quyền bên dưới mới có thể gõ lệnh <code>!may</code>, xem máy sở hữu và thao tác các nút điều khiển.</div>
   <div class="g2">
     <div>${lab('Root Admin Discord ID (Toàn Quyền)','')}${inp('config.rootAdmin')}</div>
+    <div>${lab('Giới Hạn Tạo Máy / Mỗi User (Mặc định: 2 máy)','')}${inp('config.maxMachinesPerUser',{type:'number',ph:'2'})}</div>
     <div class="wide">
       ${lab('Danh Sách User ID Được Cấp Quyền (Allowed Users)','')}
       <div class="chips" style="margin-bottom:6px">
