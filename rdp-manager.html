@@ -50,6 +50,8 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}table.t td,table.t th
 .chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}.chip{background:#23233a;border:1px solid var(--bd);border-radius:6px;padding:1px 7px;font:11.5px Consolas,monospace;cursor:pointer;color:#c4b5fd}.chip:hover{background:#34345a}
 .pill{display:inline-block;padding:3px 10px;border-radius:6px;font-size:12px;color:#fff;cursor:pointer;margin:2px;border:2px solid transparent}.pill.on{border-color:#fff}
 .toast{position:fixed;right:18px;bottom:18px;background:#1c1c2e;border:1px solid var(--bd);padding:10px 16px;border-radius:10px;z-index:99;box-shadow:0 8px 30px #000a}
+.preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px}
+.preset-grid button{width:100%;text-align:left;font-size:11.5px;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* Grid máy ảo */
 .grid-vms{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;margin-top:10px}
@@ -267,12 +269,39 @@ const md=s=>esc(s).replace(/\*\*(.+?)\*\*/gs,'<b>$1</b>').replace(/(^|[^*])\*(?!
 async function loadVars(){try{SV=await api('POST','/api/rdp/vars?pass='+encodeURIComponent(pw),{})}catch{SV={}}}
 const nid=p=>p+Date.now().toString(36).slice(-4);
 
+const EMOJIS=['🎮','🚀','🛑','🔄','🔑','🎲','📊','⚙️','📦','💻','🌐','⏰','⚡','🗑️','👁️','🙈','◀️','▶️','➕','🔙','❌','✅','🛡️','💎','👑','🛠️','📌','🔗','📁','💾','🔍','📝','💡','🏷️','👤','🚪'];
+
 function tMenus(){
   const m=T.menus[MI];
   return `<div class="ds"><div class="pnl sticky"><div class="mu" style="margin-bottom:6px">DANH SÁCH MENU</div>
   <div class="ml">${T.menus.map((x,i)=>`<button class="${i==MI?'on':''}" onclick="MI=${i};SEL={k:'embed'};draw()">🗂 ${esc(x.name)}</button>`).join('')}</div>
-  <p class="r"><button class="g sm" onclick="newMenu()">＋ Mới</button><button class="s sm" onclick="dupMenu()">⧉ Nhân bản</button><button class="d sm" onclick="rm(T.menus,MI,'menu này')">🗑</button></p><hr style="border-color:var(--bd)">
+  <p class="r" style="margin-top:6px">
+    <button class="g sm" onclick="newMenu()">＋ Mới</button>
+    <button class="s sm" onclick="dupMenu()">⧉ Sao chép</button>
+    <button class="s sm" onclick="mvMenu(-1)" title="Lên">▲</button>
+    <button class="s sm" onclick="mvMenu(1)" title="Xuống">▼</button>
+    <button class="d sm" onclick="rmMenu()">🗑</button>
+  </p><hr style="border-color:var(--bd)">
   <div class="mu">THÊM KHỐI</div><p class="r"><button class="s sm" onclick="addField()">＋ Trường</button><button class="s sm" onclick="addBtn(-1)">＋ Nút</button><button class="s sm" onclick="addRow()">＋ Hàng nút</button></p>
+  <div class="mu" style="margin-top:10px">🔘 NÚT MẪU 1-CLICK (PRESETS)</div>
+  <div class="preset-grid">
+    <button class="s sm" onclick="addPresetBtn({label:'🚀 Bắt Đầu / Quản Lý',emoji:'🚀',style:'primary',action:{type:'panel',value:'mgr'}})">🚀 Quản Lý</button>
+    <button class="g sm" onclick="addPresetBtn({label:'▶️ Chạy Máy',emoji:'▶️',style:'success',action:{type:'vm',value:'start'}})">▶️ Chạy VM</button>
+    <button class="s sm" onclick="addPresetBtn({label:'🔄 Khởi Động',emoji:'🔄',style:'primary',action:{type:'vm',value:'restart'}})">🔄 Khởi Động</button>
+    <button class="d sm" onclick="addPresetBtn({label:'🛑 Tắt Máy',emoji:'🛑',style:'danger',action:{type:'vm',value:'stop'}})">🛑 Tắt Máy</button>
+    <button class="s sm" onclick="addPresetBtn({label:'⏱️ 5 Giờ',emoji:'⏱️',style:'secondary',action:{type:'set_dur',value:'5h00m'}})">⏱️ 5 Giờ</button>
+    <button class="s sm" onclick="addPresetBtn({label:'⏱️ 3 Giờ',emoji:'⏱️',style:'secondary',action:{type:'set_dur',value:'3h00m'}})">⏱️ 3 Giờ</button>
+    <button class="s sm" onclick="addPresetBtn({label:'🔑 PIN Chuẩn',emoji:'🔑',style:'secondary',action:{type:'set_pin',value:'Aistv2026'}})">🔑 PIN Chuẩn</button>
+    <button class="s sm" onclick="addPresetBtn({label:'🎲 PIN Random',emoji:'🎲',style:'secondary',action:{type:'set_pin',value:'random'}})">🎲 PIN Random</button>
+    <button class="s sm" onclick="addPresetBtn({label:'🙈 Ẩn PIN',emoji:'🙈',style:'secondary',action:{type:'toggle_pin',value:''}})">🙈 Ẩn PIN</button>
+    <button class="s sm" onclick="addPresetBtn({label:'◀️ Trước',emoji:'◀️',style:'secondary',action:{type:'nav',value:'prev'}})">◀️ Trước</button>
+    <button class="s sm" onclick="addPresetBtn({label:'Sau ▶️',emoji:'▶️',style:'secondary',action:{type:'nav',value:'next'}})">Sau ▶️</button>
+    <button class="g sm" onclick="addPresetBtn({label:'➕ Tạo Mới',emoji:'➕',style:'success',action:{type:'panel',value:'create'}})">➕ Tạo Mới</button>
+    <button class="s sm" onclick="addPresetBtn({label:'🔄 Làm Mới',emoji:'🔄',style:'secondary',action:{type:'refresh',value:''}})">🔄 Làm Mới</button>
+    <button class="s sm" onclick="addPresetBtn({label:'🌐 Web Quản Lý',emoji:'🌐',style:'link',action:{type:'link',value:'http://127.0.0.1:8080'}})">🌐 Web RDP</button>
+    <button class="d sm" onclick="addPresetBtn({label:'🗑️ Xóa Máy',emoji:'🗑️',style:'danger',action:{type:'vm',value:'delete'}})">🗑️ Xóa Máy</button>
+    <button class="d sm" onclick="addPresetBtn({label:'❌ Đóng',emoji:'❌',style:'danger',action:{type:'panel',value:'close'}})">❌ Đóng</button>
+  </div>
   <div class="mu" style="margin-top:10px">GỬI THỬ VÀO KÊNH</div>
   <select id="chs" style="width:100%" onchange="SENDCH=this.value"><option value="">— chọn kênh —</option>${Object.entries(CH).map(([g,x])=>(x.channels||[]).map(c=>`<option value="${c.id}" ${c.id==SENDCH?'selected':''}>#${esc(c.name)}${Object.keys(CH).length>1?' ['+esc(x.name)+']':''}</option>`).join('')).join('')}</select>
   <button class="sm" style="margin-top:5px;width:100%" onclick="sendMenu()">📤 Lưu &amp; gửi thử vào Discord</button></div>
@@ -282,7 +311,7 @@ function tMenus(){
 
 function canvas(){
   const m=T.menus[MI];if(!m)return '<div class="mu">Chưa có menu — bấm “＋ Mới”.</div>';
-  const e=m.embed,k=SEL.k,on=x=>k==x?' on':'';
+  const e=m.embed||{},k=SEL.k,on=x=>k==x?' on':'';
   const col=e.color||'#8b5cf6';
   let h=`<div class="dc"><div class="dch"><span class="av">🤖</span><b>Bot Máy Ảo GameViewer</b><i class="bt">BOT</i></div>`;
   h+=`<div class="el${on('msg')}" onclick="pick('msg',event)">${m.content?md(fillv(m.content)):'<span class="ph">＋ nội dung tin nhắn (nếu có)</span>'}</div>`;
@@ -298,7 +327,7 @@ function canvas(){
     h+=`<div class="el fo${on('footer')}" onclick="pick('footer',event)">${e.footer?.text?md(fillv(e.footer.text)):'<span class="ph">＋ chân trang (footer)</span>'}</div></div>`;
   }
   (m.rows||[]).forEach((row,r)=>{
-    h+=`<div class="rowb" ondragover="event.preventDefault();this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="dropBtn(${r},null,event)">${row.map((b,c)=>`<span class="dbtn el${on('b:'+r+':'+c)}" style="background:${BST[b.style]||BST.secondary}" draggable="true" ondragstart="DR={k:'b',r:${r},c:${c}}" ondragover="event.preventDefault();event.stopPropagation()" ondrop="dropBtn(${r},${c},event)" onclick="pick('b:${r}:${c}',event)">${esc(b.emoji||'')} ${esc(fillv(b.label))}${b.style=='link'||b.action.type=='link'?' ↗':''}</span>`).join('')}${row.length<5?`<span class="addb" onclick="addBtn(${r})">＋</span>`:''}</div>`;
+    h+=`<div class="rowb" ondragover="event.preventDefault();this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="dropBtn(${r},null,event)">${row.map((b,c)=>`<span class="dbtn el${on('b:'+r+':'+c)}" style="background:${BST[b.style]||BST.secondary};${b.disabled?'opacity:0.45;cursor:not-allowed;':''}" draggable="true" ondragstart="DR={k:'b',r:${r},c:${c}}" ondragover="event.preventDefault();event.stopPropagation()" ondrop="dropBtn(${r},${c},event)" onclick="pick('b:${r}:${c}',event)">${esc(b.emoji||'')} ${esc(fillv(b.label))}${b.style=='link'||b.action?.type=='link'?' ↗':''}${b.ephemeral?' 🔒':''}</span>`).join('')}${row.length<5?`<span class="addb" onclick="addBtn(${r})">＋</span>`:''}</div>`;
   });
   if((m.rows||[]).length<5)h+=`<div class="newrow" ondragover="event.preventDefault()" ondrop="dropBtn(-1,null,event)" onclick="addRow()">＋ hàng nút mới (thả nút vào đây)</div>`;
   return h+'</div>';
@@ -313,22 +342,250 @@ function inspector(){
   const m=T.menus[MI];if(!m)return '';
   const b=`menus.${MI}.`,e=b+'embed.',k=SEL.k;let h='';
   const head=t=>`<div class="r" style="margin-bottom:8px"><b>${t}</b></div>`;
-  if(k=='msg')h=head('💬 Tin nhắn')+lab('Nội dung (nằm trên embed)','')+ta(b+'content')+lab('Tên menu','')+inp(b+'name')+`<div class="mu">id: <code>${esc(m.id)}</code></div>`+chk(b+'ownerOnly','Chỉ chủ menu (người gõ lệnh) bấm được nút')+ptxt();
-  else if(k=='embed'){h=head('🧱 Embed')+chk(e+'enabled','Hiện embed',1)+lab('Màu viền','')+`<div>${SW.map(c=>`<span class="sw ${m.embed.color==c?'on':''}" style="background:${c}" onclick="S('${e}color','${c}');pick('embed')"></span>`).join('')}</div><div class="r" style="margin-top:6px">${inp(e+'color',{t:'color'})}</div>`+lab('Link khi bấm tiêu đề','')+inp(e+'url')+chk(e+'timestamp','Hiện thời gian')}
-  else if(k=='title')h=head('🔤 Tiêu đề')+ta(e+'title')+ptxt();
-  else if(k=='desc')h=head('📝 Mô tả')+ta(e+'description',{c:'code'})+`<div class="mu">Hỗ trợ **đậm**, *nghiêng*, __gạch chân__, \`code\`, xuống dòng.</div>`+ptxt();
+  if(k=='msg'||k=='embed'){
+    h=head('🧱 Cấu Hình Menu & Embed')
+      +lab('Tên hiển thị menu','') + inp(b+'name')
+      +lab('ID Định danh menu (dùng để chuyển trang/lệnh)','') + inp(b+'id')
+      +lab('Nội dung tin nhắn (nằm trên embed)','') + ta(b+'content')
+      +chk(b+'ownerOnly','Chỉ chủ menu (người gõ lệnh) mới bấm được nút')
+      +chk(e+'enabled','Hiện khung Embed màu mè (tắt = chỉ tin nhắn)',1);
+    if(m.embed?.enabled!==false){
+      h+=lab('Màu viền Embed','')
+        +`<div>${SW.map(c=>`<span class="sw ${m.embed.color==c?'on':''}" style="background:${c}" onclick="S('${e}color','${c}');pick('embed')"></span>`).join('')}</div><div class="r" style="margin-top:6px">${inp(e+'color',{t:'color'})}</div>`
+        +lab('Link khi bấm tiêu đề','') + inp(e+'url')
+        +chk(e+'timestamp','Hiện thời gian thực tế');
+    }
+    h+=ptxt();
+  }
+  else if(k=='title')h=head('🔤 Tiêu đề Embed')+ta(e+'title')+ptxt();
+  else if(k=='desc')h=head('📝 Mô tả Embed')+ta(e+'description',{c:'code'})+`<div class="mu">Hỗ trợ **đậm**, *nghiêng*, __gạch chân__, \`code\`, xuống dòng.</div>`+ptxt();
   else if(k=='footer')h=head('🔻 Chân trang')+ta(e+'footer.text')+lab('Icon (URL)','')+inp(e+'footer.icon')+ptxt();
   else if(k=='author')h=head('👤 Tác giả')+ta(e+'author.name')+lab('Icon (URL)','')+inp(e+'author.icon')+ptxt();
   else if(k=='thumb')h=head('🖼 Ảnh nhỏ')+lab('URL ảnh (https://… hoặc {biến})','')+inp(e+'thumbnail');
   else if(k=='image')h=head('🖼 Ảnh lớn')+lab('URL ảnh (https://…)','')+inp(e+'image');
-  else if(k.startsWith('f:')){const i=+k.slice(2),f=b+`embed.fields.${i}.`;h=head('▤ Trường #'+(i+1))+lab('Tên','')+inp(f+'name')+lab('Giá trị','')+ta(f+'value')+chk(f+'inline','Xếp ngang (inline)')+`<p class="r"><button class="s sm" onclick="mv(T.menus[MI].embed.fields,${i},-1);SEL={k:'f:${Math.max(0,i-1)}'};draw()">↑</button><button class="s sm" onclick="mv(T.menus[MI].embed.fields,${i},1);SEL={k:'f:${i+1}'};draw()">↓</button><button class="d sm" onclick="T.menus[MI].embed.fields.splice(${i},1);SEL={k:'embed'};dirty(true);draw()">🗑 Xóa</button></p>`+ptxt()}
-  else if(k.startsWith('b:')){const [,r,c]=k.split(':'),p=b+`rows.${r}.${c}.`,bt=m.rows[r]?.[c];if(!bt)return head('(trống)');
-    const actTypes=[['panel','Mở bảng ẩn (Ephemeral)'],['vm','Hành động máy ảo (Start/Stop/Restart)'],['set_dur','Đặt thời lượng máy'],['set_pin','Đặt mã PIN'],['toggle_pin','Bật/Tắt ẩn PIN'],['nav','Chuyển máy trước/sau'],['cmd','Gọi lệnh bot'],['menu','Chuyển sang menu khác'],['refresh','Làm mới Dashboard'],['link','Mở đường dẫn URL']];
-    h=head('🔘 Nút Bấm Discord')+lab('Nhãn nút','')+inp(p+'label')+lab('Emoji (🎮, 🔑, hoặc <:tên:id>)','')+inp(p+'emoji')+lab('Kiểu nút (màu sắc)','')+`<div>${Object.keys(BST).map(s=>`<span class="pill ${bt.style==s?'on':''}" style="background:${BST[s]}" onclick="S('${p}style','${s}');pick('${k}')">${({primary:'Chính',secondary:'Phụ',success:'Xanh',danger:'Đỏ',link:'Link'})[s]}</span>`).join('')}</div>`
-    +lab('Hành động khi bấm','')+`<select onchange="S('${p}action.type',this.value);S('${p}action.value','');pick('${k}')">${actTypes.map(([v,t])=>`<option value="${v}" ${bt.action.type==v?'selected':''}>${t}</option>`).join('')}</select>`
-    +lab('Giá trị hành động (value)','')+inp(p+'action.value',{ph:'mgr, start, 5h, Aistv2026, ...'})
-    +`<p class="r"><button class="d sm" onclick="T.menus[MI].rows[${r}].splice(${c},1);T.menus[MI].rows=T.menus[MI].rows.filter(x=>x.length);SEL={k:'embed'};dirty(true);draw()">🗑 Xóa nút</button></p>`+ptxt()}
+  else if(k.startsWith('f:')){
+    const i=+k.slice(2),f=b+`embed.fields.${i}.`;
+    h=head('▤ Trường #'+(i+1))
+      +lab('Tên trường','') + inp(f+'name')
+      +lab('Giá trị trường','') + ta(f+'value')
+      +chk(f+'inline','Xếp ngang hàng (inline)')
+      +`<p class="r"><button class="s sm" onclick="mv(T.menus[MI].embed.fields,${i},-1);SEL={k:'f:${Math.max(0,i-1)}'};draw()">↑ Lên</button><button class="s sm" onclick="mv(T.menus[MI].embed.fields,${i},1);SEL={k:'f:${i+1}'};draw()">↓ Xuống</button><button class="s sm" onclick="dupField(${i})">⧉ Nhân bản</button><button class="d sm" onclick="T.menus[MI].embed.fields.splice(${i},1);SEL={k:'embed'};dirty(true);draw()">🗑 Xóa</button></p>`
+      +ptxt();
+  }
+  else if(k.startsWith('b:')){
+    const [,r,c]=k.split(':'),p=b+`rows.${r}.${c}.`,bt=m.rows[r]?.[c];
+    if(!bt)return head('(trống)');
+    bt.action=bt.action||{type:'panel',value:'mgr'};
+
+    const actTypes=[
+      ['menu','🗂 Chuyển sang menu khác (Switch Menu)'],
+      ['panel','🎛️ Mở bảng ẩn riêng tư (Ephemeral Modal/Panel)'],
+      ['vm','💻 Thao tác máy ảo (Start/Restart/Stop/Reload/Delete)'],
+      ['set_dur','⏱️ Đặt thời lượng máy (1h, 2h, 3h, 5h...)'],
+      ['set_pin','🔑 Đặt mã PIN GameViewer'],
+      ['nav','↔️ Chuyển / Chọn máy ảo (Trước, Sau, Chọn máy)'],
+      ['toggle_pin','🙈 Bật / Tắt ẩn mã PIN'],
+      ['quickcreate','➕ Tạo máy ảo nhanh 1-Click'],
+      ['refresh','🔄 Làm mới trạng thái từ GitHub'],
+      ['cmd','⌨️ Gọi lệnh hệ thống bot'],
+      ['link','🌐 Mở liên kết URL'],
+      ['close','❌ Đóng bảng điều khiển']
+    ];
+
+    let valCtrl='';
+    const curVal=String(bt.action?.value||'');
+
+    if(bt.action.type==='menu'){
+      const menuOpts=T.menus.map(x=>[x.id,`🗂 ${x.name} (id: ${x.id})`]);
+      valCtrl=lab('Menu Đích Chuyển Đến:','')
+        +`<select onchange="if(this.value=='__custom__'){S('${p}action.value','');}else{S('${p}action.value',this.value);}pick('${k}')">
+          <option value="">— Chọn menu đích —</option>
+          ${menuOpts.map(([mid,mname])=>`<option value="${esc(mid)}" ${curVal===mid?'selected':''}>${esc(mname)}</option>`).join('')}
+          <option value="__custom__" ${curVal&&!T.menus.some(x=>x.id===curVal)?'selected':''}>✏️ Tùy biến (nhập ID menu khác)</option>
+        </select>`
+        +(curVal&&!T.menus.some(x=>x.id===curVal)||!curVal?lab('ID Menu Tùy Biến:','')+inp(p+'action.value',{ph:'Nhập ID menu (vd: main, manager...)'}):'');
+
+    } else if(bt.action.type==='panel'){
+      const panelOpts=[
+        ['mgr','🎛️ Bảng Quản Lý Ẩn (Manager Ephemeral)'],
+        ['create','➕ Bảng Tạo Máy Nhanh (Create VM Ephemeral)'],
+        ['close','❌ Đóng Bảng Điều Khiển (Close)'],
+        ...T.menus.map(x=>[x.id,`🗂 Bảng ẩn: ${x.name} (id: ${x.id})`])
+      ];
+      valCtrl=lab('Loại Bảng Ẩn / Menu Mở Riêng Tư:','')
+        +`<select onchange="if(this.value=='__custom__'){S('${p}action.value','');}else{S('${p}action.value',this.value);}pick('${k}')">
+          ${panelOpts.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
+          <option value="__custom__" ${curVal&&!panelOpts.some(x=>x[0]===curVal)?'selected':''}>✏️ Tùy biến (nhập ID menu khác)</option>
+        </select>`
+        +(curVal&&!panelOpts.some(x=>x[0]===curVal)?lab('ID Bảng Ẩn Tùy Biến:','')+inp(p+'action.value',{ph:'Nhập ID menu mở ẩn...'}):'');
+
+    } else if(bt.action.type==='vm'){
+      const vmActs=[
+        ['start','▶️ Khởi Chạy Máy Ảo (Start / Dispatch)'],
+        ['restart','🔄 Khởi Động Lại Máy Ảo (Restart Workflow)'],
+        ['stop','🛑 Tắt Máy Ảo (Stop / Cancel Runs)'],
+        ['reload_info','🔄 Làm Mới Trạng Thái Từ GitHub (Sync State)'],
+        ['delete','🗑️ Xóa Máy Ảo (Xóa Workflow Trên Repo)']
+      ];
+      valCtrl=lab('Lệnh Thao Tác Máy Ảo:','')
+        +`<select onchange="S('${p}action.value',this.value);pick('${k}')">
+          ${vmActs.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
+        </select>`;
+
+    } else if(bt.action.type==='set_dur'){
+      const durPresets=[
+        ['1h','⏱️ 1 Giờ (1h)'],
+        ['2h','⏱️ 2 Giờ (2h)'],
+        ['3h','⏱️ 3 Giờ (3h)'],
+        ['4h','⏱️ 4 Giờ (4h)'],
+        ['5h00m','⏱️ 5 Giờ (5h00m - Tiêu chuẩn)'],
+        ['6h','⏱️ 6 Giờ (6h)']
+      ];
+      valCtrl=lab('Thời Lượng Cài Đặt:','')
+        +`<select onchange="if(this.value=='__custom__'){S('${p}action.value','');}else{S('${p}action.value',this.value);}pick('${k}')">
+          ${durPresets.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
+          <option value="__custom__" ${curVal&&!durPresets.some(x=>x[0]===curVal)?'selected':''}>✏️ Tùy biến thời lượng</option>
+        </select>`
+        +(curVal&&!durPresets.some(x=>x[0]===curVal)?lab('Nhập Thời Lượng:','')+inp(p+'action.value',{ph:'VD: 5h30m, 4h, 30m...'}):'');
+
+    } else if(bt.action.type==='set_pin'){
+      const pinPresets=[
+        ['Aistv2026','🔑 Aistv2026 (Mặc định chuẩn)'],
+        ['Admin8888','🔑 Admin8888'],
+        ['Game2026','🔑 Game2026'],
+        ['ProGamer1','🔑 ProGamer1'],
+        ['random','🎲 Ngẫu nhiên (Mỗi lần sinh mã mới)']
+      ];
+      valCtrl=lab('Mã PIN GameViewer:','')
+        +`<select onchange="if(this.value=='__custom__'){S('${p}action.value','');}else{S('${p}action.value',this.value);}pick('${k}')">
+          ${pinPresets.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
+          <option value="__custom__" ${curVal&&!pinPresets.some(x=>x[0]===curVal)?'selected':''}>✏️ Nhập mã PIN tùy chọn</option>
+        </select>`
+        +(curVal&&!pinPresets.some(x=>x[0]===curVal)?lab('Nhập Mã PIN Tùy Chọn:','')+inp(p+'action.value',{ph:'Tối thiểu 8 ký tự'}):'');
+
+    } else if(bt.action.type==='nav'){
+      const navOpts=[
+        ['prev','◀️ Máy Trước Đó (Previous)'],
+        ['next','▶️ Máy Kế Tiếp (Next)'],
+        ...Object.keys(T.machines||{}).map(mname=>[`select:${mname}`,`🖥️ Chọn Trực Tiếp: ${esc(T.machines[mname]?.displayName||mname)} (${mname})`])
+      ];
+      valCtrl=lab('Thao Tác Điều Hướng Máy:','')
+        +`<select onchange="S('${p}action.value',this.value);pick('${k}')">
+          ${navOpts.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
+        </select>`;
+
+    } else if(bt.action.type==='quickcreate'){
+      valCtrl=lab('Cấu Hình Tạo Nhanh (tên:mã_pin:thời_lượng):','')
+        +inp(p+'action.value',{ph:'auto:Aistv2026:5h'})
+        +`<div class="chips" style="margin-top:4px">
+          <span class="chip" onclick="S('${p}action.value','auto:Aistv2026:5h');pick('${k}')">Aistv2026 5h</span>
+          <span class="chip" onclick="S('${p}action.value','auto:random:5h');pick('${k}')">Random 5h</span>
+          <span class="chip" onclick="S('${p}action.value','auto:Admin8888:3h');pick('${k}')">Admin8888 3h</span>
+        </div>`;
+
+    } else if(bt.action.type==='cmd'){
+      const cmdOpts=T.commands.map(c=>[c.id,`⌨️ ${c.name} (${c.trigger})`]);
+      valCtrl=lab('Chọn Lệnh Bot Kích Hoạt:','')
+        +`<select onchange="S('${p}action.value',this.value);pick('${k}')">
+          <option value="">— Chọn lệnh —</option>
+          ${cmdOpts.map(([v,lbl])=>`<option value="${esc(v)}" ${curVal===v?'selected':''}>${esc(lbl)}</option>`).join('')}
+        </select>`;
+
+    } else if(bt.action.type==='link'){
+      valCtrl=lab('Đường Dẫn URL:','')
+        +inp(p+'action.value',{ph:'http://127.0.0.1:8080 hoặc https://...'})
+        +`<div class="chips" style="margin-top:4px">
+          <span class="chip" onclick="S('${p}action.value','http://127.0.0.1:8080');pick('${k}')">Web 8080</span>
+          <span class="chip" onclick="S('${p}action.value','https://github.com/${esc(T.config?.runnerRepo||'')}');pick('${k}')">Runner Repo</span>
+          <span class="chip" onclick="S('${p}action.value','https://github.com/${esc(T.config?.storageRepo||'')}');pick('${k}')">Storage Repo</span>
+        </div>`;
+
+    } else {
+      valCtrl=`<div class="mu" style="margin-top:6px;padding:6px;background:#1e1e30;border-radius:6px">ℹ️ Hành động này tự động thực thi ngay khi người dùng bấm nút trong Discord.</div>`;
+    }
+
+    h=`<div class="r" style="justify-content:space-between;margin-bottom:8px">
+      <b>🔘 Nút [Hàng ${+r+1}, Nút ${+c+1}]</b>
+      <div class="r">
+        <button class="s sm" title="Sang trái" onclick="mvBtnInRow(${r},${c},-1)">◀</button>
+        <button class="s sm" title="Sang phải" onclick="mvBtnInRow(${r},${c},1)">▶</button>
+        <button class="s sm" title="Lên hàng trên" onclick="mvBtnRow(${r},${c},-1)">▲</button>
+        <button class="s sm" title="Xuống hàng dưới" onclick="mvBtnRow(${r},${c},1)">▼</button>
+        <button class="s sm" title="Nhân bản nút" onclick="dupBtn(${r},${c})">⧉</button>
+        <button class="d sm" title="Xóa nút" onclick="rmBtn(${r},${c})">🗑</button>
+      </div>
+    </div>`
+    +lab('Nhãn nút (Text hiển thị trên Discord)','')+inp(p+'label')
+    +lab('Emoji đại diện (hoặc bấm chọn bên dưới)','')+inp(p+'emoji')
+    +`<div class="chips" style="margin-top:4px;max-height:76px;overflow-y:auto;padding:2px;background:#141424;border-radius:6px">
+      ${EMOJIS.map(e=>`<span class="chip" style="font-size:14px;padding:2px 5px;cursor:pointer" onclick="S('${p}emoji','${e}');pick('${k}')">${e}</span>`).join('')}
+    </div>`
+    +lab('Kiểu nút (Màu sắc Discord)','')
+    +`<div>${Object.keys(BST).map(s=>`<span class="pill ${bt.style==s?'on':''}" style="background:${BST[s]}" onclick="S('${p}style','${s}');pick('${k}')">${({primary:'Chính (Xanh)',secondary:'Phụ (Xám)',success:'Xanh lá',danger:'Đỏ',link:'Link'})[s]}</span>`).join('')}</div>`
+    +lab('Hành động khi người dùng bấm nút:','')
+    +`<select onchange="S('${p}action.type',this.value);if(this.value=='menu')S('${p}action.value','${T.menus[0]?.id||''}');else if(this.value=='panel')S('${p}action.value','mgr');else if(this.value=='vm')S('${p}action.value','start');else if(this.value=='set_dur')S('${p}action.value','5h00m');else if(this.value=='set_pin')S('${p}action.value','Aistv2026');else if(this.value=='nav')S('${p}action.value','prev');pick('${k}')">${actTypes.map(([v,t])=>`<option value="${v}" ${bt.action.type==v?'selected':''}>${t}</option>`).join('')}</select>`
+    +valCtrl
+    +`<div style="margin-top:8px;border-top:1px solid var(--bd);padding-top:8px">
+      ${chk(p+'ephemeral','Chỉ người bấm thấy phản hồi (Bảng ẩn Ephemeral)')}
+      ${chk(p+'disabled','Vô hiệu hóa nút (Disabled mờ không bấm được)')}
+    </div>`
+    +ptxt();
+  }
   return h;
+}
+
+// Thao tác nút & hàng nút
+function mvBtnInRow(r,c,dir){
+  const row=T.menus[MI].rows[r];if(!row)return;
+  const target=c+dir;if(target<0||target>=row.length)return;
+  [row[c],row[target]]=[row[target],row[c]];
+  SEL={k:`b:${r}:${target}`};dirty(true);draw();
+}
+function mvBtnRow(r,c,dir){
+  const rows=T.menus[MI].rows,targetR=r+dir;
+  if(targetR<0||targetR>=rows.length){
+    if(dir>0&&rows.length<5){
+      const btn=rows[r].splice(c,1)[0];rows.push([btn]);
+      T.menus[MI].rows=rows.filter(x=>x.length);SEL={k:`b:${rows.length-1}:0`};dirty(true);draw();
+    }
+    return;
+  }
+  if(rows[targetR].length>=5)return toast('Hàng đích đã đủ 5 nút (giới hạn Discord)');
+  const btn=rows[r].splice(c,1)[0];rows[targetR].push(btn);
+  T.menus[MI].rows=rows.filter(x=>x.length);SEL={k:`b:${targetR}:${rows[targetR].length-1}`};dirty(true);draw();
+}
+function dupBtn(r,c){
+  const row=T.menus[MI].rows[r];if(!row)return;
+  const clone=JSON.parse(JSON.stringify(row[c]));
+  if(row.length<5){row.splice(c+1,0,clone);SEL={k:`b:${r}:${c+1}`}}
+  else{addPresetBtn(clone);return}
+  dirty(true);draw();
+}
+function rmBtn(r,c){
+  const rows=T.menus[MI].rows;if(!rows[r])return;
+  rows[r].splice(c,1);T.menus[MI].rows=rows.filter(x=>x.length);SEL={k:'embed'};dirty(true);draw();
+}
+function addPresetBtn(btn){
+  const m=T.menus[MI];if(!m)return;
+  m.rows=m.rows||[];
+  let r=m.rows.findIndex(row=>row.length<5);
+  if(r===-1){
+    if(m.rows.length>=5)return toast('Đã đạt tối đa 5 hàng nút');
+    m.rows.push([btn]);r=m.rows.length-1;
+  } else {m.rows[r].push(btn)}
+  SEL={k:`b:${r}:${m.rows[r].length-1}`};dirty(true);draw();toast('✔ Đã thêm nút: '+(btn.label||btn.emoji));
+}
+function dupField(i){
+  const f=T.menus[MI].embed.fields;if(!f||f.length>=25)return toast('Tối đa 25 trường');
+  const clone=JSON.parse(JSON.stringify(f[i]));clone.name+=' (bản sao)';f.splice(i+1,0,clone);SEL={k:'f:'+(i+1)};dirty(true);draw();
+}
+function mvMenu(dir){
+  const j=MI+dir;if(j<0||j>=T.menus.length)return;
+  [T.menus[MI],T.menus[j]]=[T.menus[j],T.menus[MI]];MI=j;dirty(true);draw();
+}
+function rmMenu(){
+  if(T.menus.length<=1)return toast('Phải giữ lại ít nhất 1 menu!');
+  if(confirm('Xóa menu này?')){T.menus.splice(MI,1);MI=Math.max(0,MI-1);SEL={k:'embed'};dirty(true);draw()}
 }
 
 // Kéo thả trường và nút
@@ -424,14 +681,29 @@ async function submitCreateVm(){
 // ================= TAB 6: CÀI ĐẶT HỆ THỐNG 2-REPO =================
 function tSet(){
   const c=T.config||{};
-  return `<div class="card"><h3 style="margin:0 0 10px">Cấu hình Hệ Thống 2-Repo & Token</h3>
+  return `<div class="card"><h3 style="margin:0 0 10px;color:#c4b5fd">⚙️ Cấu hình Hệ Thống 2-Repo & GitHub Actions</h3>
   <div class="g2">
     <div>${lab('Storage Repo (Kho Lưu Ổ Đĩa Gốc)','')}${inp('config.storageRepo')}</div>
     <div>${lab('Runner Repo (Nơi Treo Actions)','')}${inp('config.runnerRepo')}</div>
     <div>${lab('PAT Token (ghp_... hoặc github_pat_...)','')}${inp('config.token')}</div>
     <div>${lab('Root Admin Discord ID','')}${inp('config.rootAdmin')}</div>
   </div></div>
-  <div class="card"><h3 style="margin:0 0 8px">Sao lưu / chuyển cấu hình</h3><div class="r"><button class="s" onclick="exportCfg()">⬇ Xuất JSON</button><label class="s" style="margin:0;background:#2a2a3d;padding:6px 13px;border-radius:8px;cursor:pointer;color:#fff;text-transform:none;font-size:14px">⬆ Nhập JSON<input type=file accept=".json" style="display:none" onchange="importCfg(this)"></label><button class="d" onclick="resetCfg()">♻ Khôi phục mặc định (lệnh & menu RDP)</button></div></div>`;
+
+  <div class="card"><h3 style="margin:0 0 10px;color:#c4b5fd">🚀 Kích Hoạt Tính Năng Hệ Thống (Feature Activators)</h3>
+  <div class="g2">
+    <div class="wide">${chk('config.cleanSid','🧹 Tự động dọn dẹp SID máy ảo cũ chống xung đột User/Profile Windows')}</div>
+    <div class="wide">${chk('config.roamDpapi','🔐 Lưu & Khôi phục DPAPI MasterKey (chống mất phiên đăng nhập GameViewer / Chrome)')}</div>
+    <div class="wide">${chk('config.enableDualApp','🎮 Cài đặt song song cả 2 App: NetEase GameViewer 4.43.1 + StarDesk 1.5.3')}</div>
+    <div class="wide">${chk('config.autoSync','🔄 Tự động đồng bộ trạng thái máy ảo từ GitHub định kỳ 30 giây')}</div>
+    <div class="wide">${chk('config.autoRescue','🛡️ Tự động tái tạo và cứu Actions khi runner bị ngắt hoặc kho bị khóa')}</div>
+    <div class="wide">${chk('config.defaultPinMasked','🙈 Mặc định che mã PIN trên Discord (••••••••) để an toàn công cộng')}</div>
+    <div>${lab('Mã PIN Mặc Định','')}${inp('config.defaultPin',{ph:'Aistv2026'})}</div>
+    <div>${lab('Thời Lượng Mặc Định','')}${inp('config.defaultDuration',{ph:'5h00m'})}</div>
+    <div>${lab('Tên Miền DuckDNS','')}${inp('config.duckdns',{ph:'datdemo.duckdns.org'})}</div>
+    <div>${lab('Địa Chỉ IP Tailscale','')}${inp('config.tailscaleIp',{ph:'100.116.244.94'})}</div>
+  </div></div>
+
+  <div class="card"><h3 style="margin:0 0 8px">💾 Sao lưu / chuyển cấu hình</h3><div class="r"><button class="s" onclick="exportCfg()">⬇ Xuất JSON</button><label class="s" style="margin:0;background:#2a2a3d;padding:6px 13px;border-radius:8px;cursor:pointer;color:#fff;text-transform:none;font-size:14px">⬆ Nhập JSON<input type=file accept=".json" style="display:none" onchange="importCfg(this)"></label><button class="d" onclick="resetCfg()">♻ Khôi phục mặc định (lệnh & menu RDP)</button></div></div>`;
 }
 
 function exportCfg(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(T,null,2)],{type:'application/json'}));a.download='rdp-config.json';a.click()}

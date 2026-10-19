@@ -1725,6 +1725,7 @@ function buildRdpPayload(menu, vars, uid) {
         if (label) bb.setLabel(label);
         if (b.emoji) bb.setEmoji(b.emoji.trim());
         if (!label && !b.emoji) return;
+        if (b.disabled) bb.setDisabled(true);
         if (b.action?.type === 'link' || b.style === 'link') {
           const u = fill(b.action?.value, vars);
           if (!okUrl(u)) return;
@@ -2115,7 +2116,7 @@ async function onButton(i) {
   const actType = btn.action?.type;
   const actVal = btn.action?.value;
 
-  const isEphemeralTrigger = (actType === 'panel' && (actVal === 'mgr' || actVal === 'create'));
+  const isEphemeralTrigger = (actType === 'panel' || btn.ephemeral === true || actVal === 'mgr' || actVal === 'create');
 
   if (isEphemeralTrigger) {
     await i.deferReply({ flags: D.MessageFlags.Ephemeral });
@@ -2134,37 +2135,55 @@ async function onButton(i) {
   };
 
   try {
-    if (actType === 'panel' && actVal === 'mgr') {
-      const mgrMenu = rdp.menus.find(m => m.id === 'manager') || menu;
-      const vars = getRdpVars(uid);
-      return send(buildRdpPayload(mgrMenu, vars, uid));
-    }
+    if (actType === 'panel' || actType === 'menu') {
+      if (actVal === 'close') {
+        return send({ content: '👋 Đã đóng bảng điều khiển. Gõ `!may` để mở lại!', components: [], embeds: [] });
+      }
 
-    if (actType === 'panel' && actVal === 'create') {
-      const autoName = `may-${Date.now().toString(36).slice(-4)}`;
-      const createMenu = {
-        id: 'create_panel',
-        ownerOnly: true,
-        embed: {
-          enabled: true,
-          color: '#10b981',
-          title: '➕ TẠO MÁY ẢO GAMEVIEWER & STARDESK MỚI',
-          description: `👉 **Chọn mã PIN có sẵn bên dưới để tạo máy nhanh:**\n• Tên máy tự sinh: \`${autoName}\` (Thời lượng 5h)\n• Hoặc gõ lệnh: \`!may tao <tên> 5h <mã_pin>\` trong kênh chat.`
-        },
-        rows: [
-          [
-            { label: '🔑 PIN Aistv2026 (5h)', emoji: '🔑', style: 'primary', action: { type: 'quickcreate', value: `${autoName}:Aistv2026:5h` } },
-            { label: '🔑 PIN Admin8888 (5h)', emoji: '🔑', style: 'secondary', action: { type: 'quickcreate', value: `${autoName}:Admin8888:5h` } },
-            { label: '🎲 PIN Random (5h)', emoji: '🎲', style: 'secondary', action: { type: 'quickcreate', value: `${autoName}:random:5h` } }
-          ],
-          [
-            { label: '🔙 Quay Lại', emoji: '🔙', style: 'secondary', action: { type: 'panel', value: 'mgr' } },
-            { label: '❌ Đóng', emoji: '❌', style: 'danger', action: { type: 'panel', value: 'close' } }
+      if (actVal === 'mgr') {
+        const mgrMenu = rdp.menus.find(m => m.id === 'manager') || menu;
+        const vars = getRdpVars(uid);
+        return send(buildRdpPayload(mgrMenu, vars, uid));
+      }
+
+      if (actVal === 'create') {
+        const autoName = `may-${Date.now().toString(36).slice(-4)}`;
+        const customCreate = rdp.menus.find(m => m.id === 'create' || m.id === 'create_panel');
+        if (customCreate) {
+          const vars = getRdpVars(uid, { curMachineId: autoName });
+          return send(buildRdpPayload(customCreate, vars, uid));
+        }
+        const createMenu = {
+          id: 'create_panel',
+          ownerOnly: true,
+          embed: {
+            enabled: true,
+            color: '#10b981',
+            title: '➕ TẠO MÁY ẢO GAMEVIEWER & STARDESK MỚI',
+            description: `👉 **Chọn mã PIN có sẵn bên dưới để tạo máy nhanh:**\n• Tên máy tự sinh: \`${autoName}\` (Thời lượng 5h)\n• Hoặc gõ lệnh: \`!may tao <tên> 5h <mã_pin>\` trong kênh chat.`
+          },
+          rows: [
+            [
+              { label: '🔑 PIN Aistv2026 (5h)', emoji: '🔑', style: 'primary', action: { type: 'quickcreate', value: `${autoName}:Aistv2026:5h` } },
+              { label: '🔑 PIN Admin8888 (5h)', emoji: '🔑', style: 'secondary', action: { type: 'quickcreate', value: `${autoName}:Admin8888:5h` } },
+              { label: '🎲 PIN Random (5h)', emoji: '🎲', style: 'secondary', action: { type: 'quickcreate', value: `${autoName}:random:5h` } }
+            ],
+            [
+              { label: '🔙 Quay Lại', emoji: '🔙', style: 'secondary', action: { type: 'panel', value: 'mgr' } },
+              { label: '❌ Đóng', emoji: '❌', style: 'danger', action: { type: 'panel', value: 'close' } }
+            ]
           ]
-        ]
-      };
-      const vars = getRdpVars(uid);
-      return send(buildRdpPayload(createMenu, vars, uid));
+        };
+        const vars = getRdpVars(uid);
+        return send(buildRdpPayload(createMenu, vars, uid));
+      }
+
+      // Any target menu ID
+      const targetMenu = rdp.menus.find(m => m.id === actVal);
+      if (targetMenu) {
+        const vars = getRdpVars(uid);
+        return send(buildRdpPayload(targetMenu, vars, uid));
+      }
     }
 
     if (actType === 'quickcreate') {
@@ -2181,10 +2200,6 @@ async function onButton(i) {
       } catch (err) {
         return send({ content: `❌ Lỗi tạo máy: ${err.message}`, components: [], embeds: [] });
       }
-    }
-
-    if (actType === 'panel' && actVal === 'close') {
-      return send({ content: '👋 Đã đóng bảng điều khiển. Gõ `!may` để mở lại!', components: [], embeds: [] });
     }
 
     if (actType === 'toggle_pin') {
@@ -2205,10 +2220,18 @@ async function onButton(i) {
     if (actType === 'nav') {
       const allM = rdp.machines || {};
       const myKeys = Object.keys(allM).filter(k => isRoot || allM[k].ownerId === uid);
-      if (myKeys.length) {
+      if (actVal && actVal.startsWith('select:')) {
+        const selName = actVal.slice(7);
+        if (allM[selName]) {
+          rdp.selectedVm = rdp.selectedVm || {};
+          rdp.selectedVm[uid] = selName;
+          if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
+          saveBridgeState(rdp);
+        }
+      } else if (myKeys.length) {
         const cur = (rdp.selectedVm && rdp.selectedVm[uid]) || myKeys[0];
         const idx = myKeys.indexOf(cur);
-        let nextIdx = idx;
+        let nextIdx = idx >= 0 ? idx : 0;
         if (actVal === 'prev') nextIdx = (idx - 1 + myKeys.length) % myKeys.length;
         else if (actVal === 'next') nextIdx = (idx + 1) % myKeys.length;
         rdp.selectedVm = rdp.selectedVm || {};
@@ -2281,6 +2304,27 @@ async function onButton(i) {
         if (curM) { curM.status = 'completed'; curM.isOnline = false; }
       } else if (actVal === 'reload_info') {
         await syncAllMachinesWithGithub();
+      } else if (actVal === 'delete') {
+        if (!isRoot && curM?.ownerId !== uid) {
+          return send({ content: '🚫 Bạn không có quyền xóa máy ảo này.', components: [], embeds: [] });
+        }
+        await cancelWorkflowRuns(cfg.runnerRepo, `${curKey}.yml`, cfg.token);
+        try {
+          const curF = await ghRequest('GET', cfg.runnerRepo, `/contents/.github/workflows/${curKey}.yml`, null, cfg.token);
+          if (curF && curF.sha) {
+            await ghRequest('DELETE', cfg.runnerRepo, `/contents/.github/workflows/${curKey}.yml`, {
+              message: `[AISTV] Xóa máy ảo ${curKey}`,
+              sha: curF.sha
+            }, cfg.token);
+          }
+        } catch (e) {
+          if (botCtx && typeof botCtx.log === 'function') botCtx.log('warn', `Delete workflow ${curKey}.yml: ${e.message}`);
+        }
+        delete rdp.machines[curKey];
+        if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
+        saveBridgeState(rdp);
+        const vars = getRdpVars(uid);
+        return send({ content: `🗑️ Đã xóa máy ảo **${curKey}** thành công!`, ...buildRdpPayload(menu, vars, uid) });
       }
 
       if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
