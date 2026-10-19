@@ -240,13 +240,13 @@ function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
   out = out.replace(/default:\s*'may-phu-2'/g, `default: '${cleanId}'`);
   out = out.replace(/default:\s*'Máy Phụ 2'/g, `default: '${dispName}'`);
   out = out.replace(/group:\s*stardesk-[^\r\n]+/g, `group: stardesk-${cleanId}`);
-  out = out.replace(/MACHINE_ID:\s*.*$/m, `      MACHINE_ID: '${cleanId}'`);
-  out = out.replace(/DISPLAY_NAME:\s*.*$/m, `      DISPLAY_NAME: '${dispName}'`);
+  out = out.replace(/^[ \t]*MACHINE_ID:\s*.*$/m, `      MACHINE_ID: '${cleanId}'`);
+  out = out.replace(/^[ \t]*DISPLAY_NAME:\s*.*$/m, `      DISPLAY_NAME: '${dispName}'`);
 
   if (storageRepo) {
     out = out.replace(/(storage_repo:[\s\S]*?default:\s*)['"][^'"]*['"]/i, `$1'${storageRepo}'`);
     out = out.replace(/default:\s*'ddvdat-glitch\/rdp'/g, `default: '${storageRepo}'`);
-    out = out.replace(/STORAGE_REPO:\s*.*$/m, `      STORAGE_REPO: '${storageRepo}'`);
+    out = out.replace(/^[ \t]*STORAGE_REPO:\s*.*$/m, `      STORAGE_REPO: '${storageRepo}'`);
   }
 
   const durVal = normalizeDuration(duration);
@@ -928,154 +928,9 @@ const origCreateServer = http.createServer;
                     }
                   }
 
-                                                      // ==========================================================================
-                  // CÁC HÀM TIỆN ÍCH GITHUB API & TỰ ĐỘNG TÁI TẠO WORKFLOW
                   // ==========================================================================
-                  function getRdpConfig() {
-                    const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
-                    const r = d.rdp || (d.shared && d.shared.rdp) || d;
-                    const cfg = r.config || {};
-                    const storageRepo = cfg.storageRepo || process.env.STORAGE_REPO || 'ddvdat-glitch/rdp';
-                    const runnerRepo = cfg.runnerRepo || process.env.RUNNER_REPO || 'ohohhoho82-alt/app';
-                    const token = cfg.token || process.env.GITHUB_TOKEN || process.env.PAT_TOKEN || process.env.RDP_GH_TOKEN || process.env.STORAGE_GH_TOKEN || process.env.GH_TOKEN || '';
-                    const rootAdmin = cfg.rootAdmin || '946662197168341053';
-                    return { storageRepo, runnerRepo, token, rootAdmin, ...cfg };
-                  }
-
-                  function ghRequest(method, repo, endpoint, body, customToken) {
-                    return new Promise((resolve, reject) => {
-                      const cfg = getRdpConfig();
-                      const token = customToken || cfg.token;
-                      const pathUrl = endpoint.startsWith('http')
-                        ? endpoint.replace('https://api.github.com', '')
-                        : (endpoint.startsWith('/repos/') ? endpoint : `/repos/${repo}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`);
-
-                      const dataStr = body ? JSON.stringify(body) : null;
-                      const headers = {
-                        'User-Agent': 'AISTV-RDP-Manager-Web',
-                        'Accept': 'application/vnd.github+json'
-                      };
-                      if (token) {
-                        headers['Authorization'] = (token.startsWith('Bearer ') || token.startsWith('token ')) ? token : `token ${token}`;
-                      }
-                      if (dataStr) {
-                        headers['Content-Type'] = 'application/json';
-                        headers['Content-Length'] = Buffer.byteLength(dataStr);
-                      }
-
-                      const req = https.request({
-                        hostname: 'api.github.com',
-                        port: 443,
-                        path: pathUrl,
-                        method: method.toUpperCase(),
-                        headers
-                      }, res => {
-                        let data = '';
-                        res.on('data', chunk => data += chunk);
-                        res.on('end', () => {
-                          if (res.statusCode === 204) return resolve(true);
-                          let json = null;
-                          try { json = JSON.parse(data); } catch { json = null; }
-                          if (res.statusCode >= 200 && res.statusCode < 300) {
-                            return resolve(json != null ? json : data);
-                          }
-                          const errMsg = (json && json.message) || data || `HTTP ${res.statusCode}`;
-                          const err = new Error(errMsg);
-                          err.status = res.statusCode;
-                          err.data = json;
-                          reject(err);
-                        });
-                      });
-
-                      req.on('error', reject);
-                      req.setTimeout(25000, () => {
-                        req.destroy();
-                        reject(new Error('GitHub API request timeout (25s)'));
-                      });
-                      if (dataStr) req.write(dataStr);
-                      req.end();
-                    });
-                  }
-
-                  function loadTaomayTemplate() {
-                    const localCandidates = [
-                      path.join(__dirname, 'taomay.yml'),
-                      path.join(__dirname, 'taomay.yaml'),
-                      path.join(process.cwd(), 'taomay.yml'),
-                      path.join(process.cwd(), 'taomay.yaml'),
-                      path.join(process.cwd(), '.github/workflows/taomay.yml'),
-                      'c:/Users/acc/Downloads/badao/taomay.yml',
-                      'c:/Users/acc/Downloads/badao/taomay.yaml'
-                    ];
-                    for (const lp of localCandidates) {
-                      try {
-                        if (fs.existsSync(lp)) return fs.readFileSync(lp, 'utf8');
-                      } catch {}
-                    }
-                    return null;
-                  }
-
-                  function normalizeDuration(dur) {
-  if (!dur) return '5h00m';
-  const s = String(dur).toLowerCase().trim();
-  if (s === '1' || s.startsWith('1h')) return '1h';
-  if (s === '3' || s.startsWith('3h')) return '3h';
-  return '5h00m';
-}
-
-function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
-                    let out = tpl;
-                    out = out.replace(/^name:\s*.*$/m, `name: máy ${name}`);
-                    out = out.replace(/default:\s*'may-phu-2'/g, `default: '${name}'`);
-                    out = out.replace(/default:\s*'Máy Phụ 2'/g, `default: 'Máy ${name}'`);
-                    out = out.replace(/group:\s*stardesk-[^\r\n]+/g, `group: stardesk-${name}`);
-                    out = out.replace(/MACHINE_ID:\s*\${{[^}]+}}/g, `MACHINE_ID: '${name}'`);
-                    out = out.replace(/DISPLAY_NAME:\s*\${{[^}]+}}/g, `DISPLAY_NAME: 'Máy ${name}'`);
-
-                    if (storageRepo) {
-                      out = out.replace(/default:\s*'ddvdat-glitch\/rdp'/g, `default: '${storageRepo}'`);
-                      out = out.replace(/STORAGE_REPO:\s*\${{[^}]+}}/g, `STORAGE_REPO: '${storageRepo}'`);
-                    }
-
-                    if (duration) {
-                      const durVal = normalizeDuration(duration);
-                      out = out.replace(/(duration:[\s\S]*?default:\s*)'[0-9a-z]+'/i, `$1'${durVal}'`);
-                    }
-
-                    if (pin) {
-                      const cleanPin = pin.replace(/[^A-Za-z0-9]/g, '');
-                      out = out.replace(/(pin_code:[\s\S]*?default:\s*)'[A-Za-z0-9@_.-]+'/i, `$1'${cleanPin}'`);
-                      out = out.replace(/(fixed_password:[\s\S]*?default:\s*)'[A-Za-z0-9@_.-]+'/i, `$1'${cleanPin}'`);
-                    }
-
-                    return out;
-                  }
-
-                  async function dispatchWorkflow(runnerRepo, wfFile, inputs = {}, token) {
-  const safeInputs = { ...(inputs || {}) };
-  if (safeInputs.duration) {
-    safeInputs.duration = normalizeDuration(safeInputs.duration);
-  }
-  return await ghRequest('POST', runnerRepo, `/actions/workflows/${wfFile}/dispatches`, {
-    ref: 'main',
-    inputs: safeInputs
-  }, token);
-}
-
-                  async function cancelWorkflowRuns(runnerRepo, wfFile, token) {
-                    try {
-                      const res = await ghRequest('GET', runnerRepo, `/actions/workflows/${wfFile}/runs?status=in_progress&per_page=10`, null, token);
-                      const runs = (res && res.workflow_runs) || [];
-                      for (const r of runs) {
-                        try { await ghRequest('POST', runnerRepo, `/actions/runs/${r.id}/cancel`, null, token); } catch {}
-                      }
-                      const qRes = await ghRequest('GET', runnerRepo, `/actions/workflows/${wfFile}/runs?status=queued&per_page=10`, null, token);
-                      const qRuns = (qRes && qRes.workflow_runs) || [];
-                      for (const r of qRuns) {
-                        try { await ghRequest('POST', runnerRepo, `/actions/runs/${r.id}/cancel`, null, token); } catch {}
-                      }
-                    } catch {}
-                  }
+                  // GITHUB API & WORKFLOW ACTIONS (Được quản lý tập trung ở đầu tệp)
+                  // ==========================================================================
 
                   // --------------------------------------------------------------------------
                   // 5.1 API: QUÉT TẤT CẢ FILE WORKFLOW TRÊN RUNNER REPO
