@@ -864,7 +864,9 @@ function tSet(){
   <div class="g2">
     <div>${lab('Storage Repo (Kho Lưu Ổ Đĩa Gốc)','')}${inp('config.storageRepo')}</div>
     <div>${lab('Runner Repo (Nơi Treo Actions)','')}${inp('config.runnerRepo')}</div>
-    <div>${lab('PAT Token (ghp_... hoặc github_pat_...)','')}${inp('config.token')}</div>
+    <div>${lab('Runner PAT Token (Treo Máy & Actions)','')}${inp('config.runnerToken',{ph:'ghp_... hoặc github_pat_...'})}</div>
+    <div>${lab('Storage PAT Token (Lưu Ổ Đĩa Gốc - nếu khác tài khoản)','')}${inp('config.storageToken',{ph:'ghp_... (để trống nếu dùng chung)'})}</div>
+    <div>${lab('PAT Token Chung (Dự Phòng)','')}${inp('config.token',{ph:'ghp_...'})}</div>
     <div>${lab('Root Admin Discord ID','')}${inp('config.rootAdmin')}</div>
   </div></div>
 

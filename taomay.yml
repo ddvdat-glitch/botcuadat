@@ -1475,6 +1475,7 @@ jobs:
           'SESSION_READY=1' >> "$env:GITHUB_ENV";
           Write-Host "✅ User gốc [$user] ($profPath) đã sẵn sàng!" -ForegroundColor Green;
           exit 0;
+
       # ───────────────────────────────────────────────
       # 9. KHỞI CHẠY WEB PANEL QUẢN LÝ (PORT 8080) & GHI STATE
       # ───────────────────────────────────────────────

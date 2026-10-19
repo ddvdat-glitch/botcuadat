@@ -109,7 +109,12 @@ function getRdpConfig() {
   const cfg = r.config || {};
   const storageRepo = (cfg.storageRepo && String(cfg.storageRepo).trim()) || process.env.STORAGE_REPO || 'ddvdat-glitch/rdp';
   const runnerRepo = (cfg.runnerRepo && String(cfg.runnerRepo).trim()) || process.env.RUNNER_REPO || 'ohohhoho82-alt/app';
-  const token = (cfg.token && String(cfg.token).trim()) || process.env.PAT_TOKEN || process.env.RDP_GH_TOKEN || process.env.STORAGE_GH_TOKEN || process.env.GH_PAT_CROSS_REPO || process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
+  
+  // Hỗ trợ cả 2 token độc lập (Runner PAT & Storage PAT)
+  const runnerToken = (cfg.runnerToken && String(cfg.runnerToken).trim()) || (cfg.token && String(cfg.token).trim()) || process.env.PAT_TOKEN || process.env.RUNNER_GH_TOKEN || process.env.RDP_GH_TOKEN || process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
+  const storageToken = (cfg.storageToken && String(cfg.storageToken).trim()) || process.env.STORAGE_GH_TOKEN || process.env.STORAGE_PAT_TOKEN || process.env.GH_PAT_CROSS_REPO || (cfg.token && String(cfg.token).trim()) || runnerToken;
+  const token = runnerToken || storageToken;
+
   const rootAdmin = (cfg.rootAdmin && String(cfg.rootAdmin).trim()) || '946662197168341053';
   const allowedUsers = Array.isArray(cfg.allowedUsers) && cfg.allowedUsers.length ? cfg.allowedUsers : ['946662197168341053'];
   const allowedRoles = Array.isArray(cfg.allowedRoles) ? cfg.allowedRoles : [];
@@ -117,6 +122,8 @@ function getRdpConfig() {
     ...cfg,
     storageRepo,
     runnerRepo,
+    runnerToken,
+    storageToken,
     token,
     rootAdmin,
     allowedUsers,
@@ -127,7 +134,17 @@ function getRdpConfig() {
 function ghRequest(method, repo, endpoint, body, customToken) {
   return new Promise((resolve, reject) => {
     const cfg = getRdpConfig();
-    const token = customToken || cfg.token;
+    let token = customToken;
+    if (!token) {
+      const targetRepo = String(repo || '').toLowerCase();
+      if (targetRepo && cfg.storageRepo && targetRepo === cfg.storageRepo.toLowerCase()) {
+        token = cfg.storageToken || cfg.token;
+      } else if (targetRepo && cfg.runnerRepo && targetRepo === cfg.runnerRepo.toLowerCase()) {
+        token = cfg.runnerToken || cfg.token;
+      } else {
+        token = cfg.runnerToken || cfg.token || cfg.storageToken;
+      }
+    }
     if (!token && (method.toUpperCase() === 'POST' || method.toUpperCase() === 'PUT' || method.toUpperCase() === 'DELETE')) {
       return reject(new Error('Chưa cấu hình GitHub Token (PAT)! Chat `!may token <token_pat>` hoặc vào Web Quản Lý (Tab Cài Đặt) để điền PAT Token.'));
     }
@@ -244,15 +261,47 @@ function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
   return out;
 }
 
-                  async function dispatchWorkflow(runnerRepo, wfFile, inputs = {}, token) {
+async function dispatchWorkflow(runnerRepo, wfFile, inputs = {}, token) {
   const safeInputs = { ...(inputs || {}) };
   if (safeInputs.duration) {
     safeInputs.duration = normalizeDuration(safeInputs.duration);
   }
-  return await ghRequest('POST', runnerRepo, `/actions/workflows/${wfFile}/dispatches`, {
-    ref: 'main',
-    inputs: safeInputs
-  }, token);
+
+  // Tự động phát hiện default_branch của runnerRepo (tránh lỗi lệch giữa main và master)
+  let refBranch = 'main';
+  try {
+    const rInfo = await ghRequest('GET', runnerRepo, '', null, token);
+    if (rInfo && rInfo.default_branch) {
+      refBranch = rInfo.default_branch;
+    }
+  } catch {}
+
+  // Cơ chế Retry tự động xử lý khoảng trễ Indexing của GitHub Actions (Race condition khi tạo file mới)
+  const maxRetries = 6;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await ghRequest('POST', runnerRepo, `/actions/workflows/${wfFile}/dispatches`, {
+        ref: refBranch,
+        inputs: safeInputs
+      }, token);
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err.message || '');
+      const isIndexPending = msg.includes("Workflow does not have 'workflow_dispatch' trigger")
+        || msg.includes("does not exist")
+        || err.status === 404
+        || err.status === 422;
+
+      if (isIndexPending && attempt < maxRetries) {
+        // Chờ tăng dần: 3s, 5s, 7s, 9s, 11s... để GitHub Actions kịp quét và kích hoạt trigger
+        await new Promise(r => setTimeout(r, (attempt * 2 + 1) * 1000));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
 }
 
                   async function cancelWorkflowRuns(runnerRepo, wfFile, token) {
@@ -1224,13 +1273,28 @@ function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
                         sha
                       }, cfg.token);
 
-                      await new Promise(r => setTimeout(r, 1500));
-                      await dispatchWorkflow(runnerRepo, `${cleanName}.yml`, {
-                        machine_id: cleanName,
-                        display_name: displayName,
-                        duration,
-                        pin_code: pin
-                      }, cfg.token);
+                      await new Promise(r => setTimeout(r, 2500));
+                      try {
+                        await dispatchWorkflow(runnerRepo, `${cleanName}.yml`, {
+                          machine_id: cleanName,
+                          display_name: displayName,
+                          duration,
+                          pin_code: pin,
+                          storage_repo: storageRepo
+                        }, cfg.runnerToken || cfg.token);
+                      } catch (err) {
+                        if (String(err.message || '').includes("workflow_dispatch")) {
+                          await dispatchWorkflow(runnerRepo, 'taomay.yml', {
+                            machine_id: cleanName,
+                            display_name: displayName,
+                            duration,
+                            pin_code: pin,
+                            storage_repo: storageRepo
+                          }, cfg.runnerToken || cfg.token);
+                        } else {
+                          throw err;
+                        }
+                      }
 
                       st.machines = st.machines || {};
                       st.machines[cleanName] = {
@@ -1988,15 +2052,29 @@ async function createMachineWorkflow(name, duration, pin, uid, displayName, owne
     sha
   }, cfg.token);
 
-  await new Promise(r => setTimeout(r, 1500));
+  await new Promise(r => setTimeout(r, 2500));
 
-  await dispatchWorkflow(cfg.runnerRepo, `${cleanName}.yml`, {
-    machine_id: cleanName,
-    display_name: cleanDisplayName,
-    duration: cleanDur,
-    pin_code: cleanPin,
-    storage_repo: cfg.storageRepo
-  }, cfg.token);
+  try {
+    await dispatchWorkflow(cfg.runnerRepo, `${cleanName}.yml`, {
+      machine_id: cleanName,
+      display_name: cleanDisplayName,
+      duration: cleanDur,
+      pin_code: cleanPin,
+      storage_repo: cfg.storageRepo
+    }, cfg.runnerToken || cfg.token);
+  } catch (err) {
+    if (String(err.message || '').includes("workflow_dispatch")) {
+      await dispatchWorkflow(cfg.runnerRepo, 'taomay.yml', {
+        machine_id: cleanName,
+        display_name: cleanDisplayName,
+        duration: cleanDur,
+        pin_code: cleanPin,
+        storage_repo: cfg.storageRepo
+      }, cfg.runnerToken || cfg.token);
+    } else {
+      throw err;
+    }
+  }
 
   st.machines = st.machines || {};
   st.machines[cleanName] = {
@@ -2463,14 +2541,16 @@ async function onMessage(msg) {
   }
 
   // 1b. CÀI ĐẶT GITHUB PAT TOKEN & ĐỔI RUNNER REPO TRỰC TIẾP
-  if (lower.startsWith('!may token') || lower.startsWith('!may pat')) {
+  if (lower.startsWith('!may token') || lower.startsWith('!may pat') || lower.startsWith('!may runnertoken') || lower.startsWith('!may storagetoken')) {
     if (!isRootAdmin(uid, cfg.rootAdmin)) {
       await msg.reply('🚫 Chỉ có Admin Tối Cao (`946662197168341053`) mới có quyền cài đặt GitHub Token!').catch(() => {});
       return true;
     }
-    const tokenVal = text.replace(/^!may\s+(token|pat)\s*/i, '').trim();
+    const isRunner = lower.startsWith('!may runnertoken');
+    const isStorage = lower.startsWith('!may storagetoken');
+    const tokenVal = text.replace(/^!may\s+(token|pat|runnertoken|storagetoken)\s*/i, '').trim();
     if (!tokenVal) {
-      await msg.reply('⚠️ Cú pháp: `!may token <github_pat_token>`\nVí dụ: `!may token ghp_xxxx` hoặc `!may token github_pat_xxxx`').catch(() => {});
+      await msg.reply(`⚠️ Cú pháp:\n• \`!may token <token>\` : Cài đặt Token PAT chung\n• \`!may runnertoken <token>\` : Token riêng cho Repo Treo Máy (\`${cfg.runnerRepo}\`)\n• \`!may storagetoken <token>\` : Token riêng cho Repo Lưu Trữ Gốc (\`${cfg.storageRepo}\`)`).catch(() => {});
       return true;
     }
     msg.delete().catch(() => {});
@@ -2478,11 +2558,42 @@ async function onMessage(msg) {
     const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
     const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
     rdp.config = rdp.config || {};
-    rdp.config.token = tokenVal;
+    if (isRunner) {
+      rdp.config.runnerToken = tokenVal;
+      rdp.config.token = tokenVal;
+    } else if (isStorage) {
+      rdp.config.storageToken = tokenVal;
+    } else {
+      rdp.config.token = tokenVal;
+      rdp.config.runnerToken = tokenVal;
+    }
     saveBridgeState(rdp);
     if (botCtx && typeof botCtx.saveNow === 'function') botCtx.saveNow();
 
-    await msg.channel.send(`✅ **ĐÃ LƯU GITHUB PAT TOKEN THÀNH CÔNG!**\n• Admin: <@${uid}>\n• Đã xóa tin nhắn chứa token khỏi kênh chat để bảo mật.\n• Bây giờ bạn có thể tạo và điều khiển máy ảo bình thường!`).catch(() => {});
+    const tokenType = isRunner ? 'Runner Repo Token' : (isStorage ? 'Storage Repo Token' : 'GitHub PAT Token (chung)');
+    await msg.channel.send(`✅ **ĐÃ LƯU ${tokenType.toUpperCase()} THÀNH CÔNG!**\n• Admin: <@${uid}>\n• Đã xóa tin nhắn chứa token khỏi kênh chat để bảo mật.\n• Bây giờ bạn có thể tạo và điều khiển máy ảo bình thường!`).catch(() => {});
+    return true;
+  }
+
+  if (lower.startsWith('!may config') || lower.startsWith('!may thongtin')) {
+    if (!isUserAllowed(uid, msg.member, cfg)) {
+      await msg.reply(`⛔ Bạn chưa được cấp quyền sử dụng hệ thống máy ảo! Hãy liên hệ Admin tối cao (<@${cfg.rootAdmin}>).`).catch(() => {});
+      return true;
+    }
+    const hasRunnerTok = !!cfg.runnerToken || !!cfg.token;
+    const hasStorageTok = !!cfg.storageToken || !!cfg.token;
+    const rep = [
+      '⚙️ **THÔNG TIN CẤU HÌNH HỆ THỐNG MÁY ẢO RDP**',
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      `📦 **Repo Lưu Trữ (Storage):** \`${cfg.storageRepo}\``,
+      `  • Token: ${hasStorageTok ? '🟢 Đã cấu hình' : '🔴 Chưa cấu hình (dùng `!may storagetoken <token>`)'}`,
+      `🚀 **Repo Treo Máy (Runner):** \`${cfg.runnerRepo}\``,
+      `  • Token: ${hasRunnerTok ? '🟢 Đã cấu hình' : '🔴 Chưa cấu hình (dùng `!may runnertoken <token>`)'}`,
+      `👑 **Root Admin:** <@${cfg.rootAdmin}>`,
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      '💡 *Lưu ý: Nếu dùng 2 tài khoản GitHub khác nhau: Runner Repo cần token của acc phụ, Storage Repo cần token của acc chính!*'
+    ].join('\n');
+    await msg.reply(rep).catch(() => {});
     return true;
   }
 
