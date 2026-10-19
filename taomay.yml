@@ -21,6 +21,7 @@ on:
         options:
           - '1h'
           - '3h'
+          - '5h'
           - '5h00m'
       auto_restart:
         description: '🔁 Tự khởi động phiên mới sau khi hết giờ'

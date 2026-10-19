@@ -177,7 +177,15 @@ function ghRequest(method, repo, endpoint, body, customToken) {
                     return null;
                   }
 
-                  function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
+                  function normalizeDuration(dur) {
+  if (!dur) return '5h00m';
+  const s = String(dur).toLowerCase().trim();
+  if (s === '1' || s.startsWith('1h')) return '1h';
+  if (s === '3' || s.startsWith('3h')) return '3h';
+  return '5h00m';
+}
+
+function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
                     let out = tpl;
                     out = out.replace(/^name:\s*.*$/m, `name: máy ${name}`);
                     out = out.replace(/default:\s*'may-phu-2'/g, `default: '${name}'`);
@@ -192,7 +200,7 @@ function ghRequest(method, repo, endpoint, body, customToken) {
                     }
 
                     if (duration) {
-                      const durVal = duration.includes('h') ? duration : `${duration}h`;
+                      const durVal = normalizeDuration(duration);
                       out = out.replace(/(duration:[\s\S]*?default:\s*)'[0-9a-z]+'/i, `$1'${durVal}'`);
                     }
 
@@ -206,11 +214,15 @@ function ghRequest(method, repo, endpoint, body, customToken) {
                   }
 
                   async function dispatchWorkflow(runnerRepo, wfFile, inputs = {}, token) {
-                    return await ghRequest('POST', runnerRepo, `/actions/workflows/${wfFile}/dispatches`, {
-                      ref: 'main',
-                      inputs
-                    }, token);
-                  }
+  const safeInputs = { ...(inputs || {}) };
+  if (safeInputs.duration) {
+    safeInputs.duration = normalizeDuration(safeInputs.duration);
+  }
+  return await ghRequest('POST', runnerRepo, `/actions/workflows/${wfFile}/dispatches`, {
+    ref: 'main',
+    inputs: safeInputs
+  }, token);
+}
 
                   async function cancelWorkflowRuns(runnerRepo, wfFile, token) {
                     try {
@@ -923,7 +935,15 @@ const origCreateServer = http.createServer;
                     return null;
                   }
 
-                  function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
+                  function normalizeDuration(dur) {
+  if (!dur) return '5h00m';
+  const s = String(dur).toLowerCase().trim();
+  if (s === '1' || s.startsWith('1h')) return '1h';
+  if (s === '3' || s.startsWith('3h')) return '3h';
+  return '5h00m';
+}
+
+function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
                     let out = tpl;
                     out = out.replace(/^name:\s*.*$/m, `name: máy ${name}`);
                     out = out.replace(/default:\s*'may-phu-2'/g, `default: '${name}'`);
@@ -938,7 +958,7 @@ const origCreateServer = http.createServer;
                     }
 
                     if (duration) {
-                      const durVal = duration.includes('h') ? duration : `${duration}h`;
+                      const durVal = normalizeDuration(duration);
                       out = out.replace(/(duration:[\s\S]*?default:\s*)'[0-9a-z]+'/i, `$1'${durVal}'`);
                     }
 
@@ -952,11 +972,15 @@ const origCreateServer = http.createServer;
                   }
 
                   async function dispatchWorkflow(runnerRepo, wfFile, inputs = {}, token) {
-                    return await ghRequest('POST', runnerRepo, `/actions/workflows/${wfFile}/dispatches`, {
-                      ref: 'main',
-                      inputs
-                    }, token);
-                  }
+  const safeInputs = { ...(inputs || {}) };
+  if (safeInputs.duration) {
+    safeInputs.duration = normalizeDuration(safeInputs.duration);
+  }
+  return await ghRequest('POST', runnerRepo, `/actions/workflows/${wfFile}/dispatches`, {
+    ref: 'main',
+    inputs: safeInputs
+  }, token);
+}
 
                   async function cancelWorkflowRuns(runnerRepo, wfFile, token) {
                     try {
@@ -1911,7 +1935,7 @@ async function createMachineWorkflow(name, duration, pin, uid, displayName) {
 
   const cleanName = String(name || '').toLowerCase().replace(/[^a-z0-9\-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || `may-${Date.now().toString(36).slice(-4)}`;
   const cleanPin = (pin ? String(pin).trim() : 'Aistv2026').replace(/[^A-Za-z0-9]/g, '') || 'Aistv2026';
-  const cleanDur = duration ? (duration.includes('h') ? duration : `${duration}h`) : '5h';
+  const cleanDur = normalizeDuration(duration);
   const cleanDisplayName = displayName || `Máy ${cleanName}`;
 
   let tpl = loadTaomayTemplate();
@@ -1973,7 +1997,7 @@ async function restartMachineWorkflow(name) {
   await cancelWorkflowRuns(cfg.runnerRepo, `${name}.yml`, cfg.token);
   await new Promise(r => setTimeout(r, 2000));
   await dispatchWorkflow(cfg.runnerRepo, `${name}.yml`, {
-    duration: (m && m.duration) || '5h',
+    duration: normalizeDuration(m && m.duration),
     pin_code: (m && m.gvPin) || 'Aistv2026'
   }, cfg.token);
   if (m) {
@@ -2476,10 +2500,10 @@ async function showCreateMachineModal(i, uid) {
 
   const durInput = new D.TextInputBuilder()
     .setCustomId('vm_dur')
-    .setLabel('Thời Lượng Treo (5h, 3h, 1h, 6h...)')
+    .setLabel('Thời Lượng Treo (5h00m, 3h, 1h)')
     .setStyle(D.TextInputStyle.Short)
-    .setPlaceholder('5h')
-    .setValue('5h')
+    .setPlaceholder('5h00m')
+    .setValue('5h00m')
     .setRequired(false)
     .setMaxLength(10);
 
@@ -2501,11 +2525,11 @@ async function handleModalCreateSubmit(i, uid) {
 
   const rawName = i.fields.getTextInputValue('vm_name');
   const rawPin = i.fields.getTextInputValue('vm_pin');
-  const rawDur = i.fields.getTextInputValue('vm_dur') || '5h';
+  const rawDur = i.fields.getTextInputValue('vm_dur') || '5h00m';
 
   const cleanName = String(rawName || '').toLowerCase().replace(/[^a-z0-9\-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || `may-${Date.now().toString(36).slice(-4)}`;
   const cleanPin = (rawPin || 'Aistv2026').replace(/[^A-Za-z0-9]/g, '') || 'Aistv2026';
-  const cleanDur = rawDur.includes('h') ? rawDur : `${rawDur}h`;
+  const cleanDur = normalizeDuration(rawDur);
 
   const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
   const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
@@ -2753,7 +2777,7 @@ async function onButton(i) {
       if (actType === 'set_dur') {
         const curKey = (rdp.selectedVm && rdp.selectedVm[uid]) || Object.keys(rdp.machines || {})[0];
         if (curKey && rdp.machines && rdp.machines[curKey]) {
-          rdp.machines[curKey].duration = actVal;
+          rdp.machines[curKey].duration = normalizeDuration(actVal);
           if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
           saveBridgeState(rdp);
         }
@@ -2789,7 +2813,7 @@ async function onButton(i) {
           const curM = rdp.machines && rdp.machines[curKey];
           if (actVal === 'start') {
             await dispatchWorkflow(cfg.runnerRepo, `${curKey}.yml`, {
-              duration: curM?.duration || '5h',
+              duration: normalizeDuration(curM?.duration),
               pin_code: curM?.gvPin || 'Aistv2026'
             }, cfg.token);
             if (curM) { curM.status = 'in_progress'; curM.isOnline = true; }
@@ -2797,7 +2821,7 @@ async function onButton(i) {
             await cancelWorkflowRuns(cfg.runnerRepo, `${curKey}.yml`, cfg.token);
             await new Promise(r => setTimeout(r, 2000));
             await dispatchWorkflow(cfg.runnerRepo, `${curKey}.yml`, {
-              duration: curM?.duration || '5h',
+              duration: normalizeDuration(curM?.duration),
               pin_code: curM?.gvPin || 'Aistv2026'
             }, cfg.token);
             if (curM) { curM.status = 'in_progress'; curM.isOnline = true; }
