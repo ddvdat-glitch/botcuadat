@@ -84,22 +84,33 @@ function getRdpConfig() {
   const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
   const r = d.rdp || (d.shared && d.shared.rdp) || d;
   const cfg = r.config || {};
-  const storageRepo = cfg.storageRepo || process.env.STORAGE_REPO || 'ddvdat-glitch/rdp';
-  const runnerRepo = cfg.runnerRepo || process.env.RUNNER_REPO || 'ohohhoho82-alt/app';
-  const token = cfg.token || process.env.GITHUB_TOKEN || process.env.PAT_TOKEN || process.env.RDP_GH_TOKEN || process.env.STORAGE_GH_TOKEN || process.env.GH_TOKEN || '';
-  const rootAdmin = cfg.rootAdmin || '946662197168341053';
-  const allowedUsers = Array.isArray(cfg.allowedUsers) ? cfg.allowedUsers : ['946662197168341053'];
+  const storageRepo = (cfg.storageRepo && String(cfg.storageRepo).trim()) || process.env.STORAGE_REPO || 'ddvdat-glitch/rdp';
+  const runnerRepo = (cfg.runnerRepo && String(cfg.runnerRepo).trim()) || process.env.RUNNER_REPO || 'ohohhoho82-alt/app';
+  const token = (cfg.token && String(cfg.token).trim()) || process.env.PAT_TOKEN || process.env.RDP_GH_TOKEN || process.env.STORAGE_GH_TOKEN || process.env.GH_PAT_CROSS_REPO || process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
+  const rootAdmin = (cfg.rootAdmin && String(cfg.rootAdmin).trim()) || '946662197168341053';
+  const allowedUsers = Array.isArray(cfg.allowedUsers) && cfg.allowedUsers.length ? cfg.allowedUsers : ['946662197168341053'];
   const allowedRoles = Array.isArray(cfg.allowedRoles) ? cfg.allowedRoles : [];
-  return { storageRepo, runnerRepo, token, rootAdmin, allowedUsers, allowedRoles, ...cfg };
+  return {
+    ...cfg,
+    storageRepo,
+    runnerRepo,
+    token,
+    rootAdmin,
+    allowedUsers,
+    allowedRoles
+  };
 }
 
-                  function ghRequest(method, repo, endpoint, body, customToken) {
-                    return new Promise((resolve, reject) => {
-                      const cfg = getRdpConfig();
-                      const token = customToken || cfg.token;
-                      const pathUrl = endpoint.startsWith('http')
-                        ? endpoint.replace('https://api.github.com', '')
-                        : (endpoint.startsWith('/repos/') ? endpoint : `/repos/${repo}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`);
+function ghRequest(method, repo, endpoint, body, customToken) {
+  return new Promise((resolve, reject) => {
+    const cfg = getRdpConfig();
+    const token = customToken || cfg.token;
+    if (!token && (method.toUpperCase() === 'POST' || method.toUpperCase() === 'PUT' || method.toUpperCase() === 'DELETE')) {
+      return reject(new Error('Chưa cấu hình GitHub Token (PAT)! Chat `!may token <token_pat>` hoặc vào Web Quản Lý (Tab Cài Đặt) để điền PAT Token.'));
+    }
+    const pathUrl = endpoint.startsWith('http')
+      ? endpoint.replace('https://api.github.com', '')
+      : (endpoint.startsWith('/repos/') ? endpoint : `/repos/${repo}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`);
 
                       const dataStr = body ? JSON.stringify(body) : null;
                       const headers = {
@@ -1572,20 +1583,6 @@ function init(ctx) {
     ctx.log('system', 'RDP Bridge & Bot Controller initialized');
   }
 
-  // Lắng nghe tương tác an toàn (bắt các sự kiện ModalSubmit và SelectMenu)
-  if (ctx && ctx.client) {
-    ctx.client.on('interactionCreate', async i => {
-      try {
-        if (!i.customId || !String(i.customId).startsWith('rdp:')) return;
-        if (i.isModalSubmit() || i.isStringSelectMenu() || (i.isButton() && i.customId.startsWith('rdp:select_vm:'))) {
-          return await onInteraction(i);
-        }
-      } catch (err) {
-        if (botCtx && typeof botCtx.log === 'function') botCtx.log('error', 'rdp interaction listener: ' + err.message);
-      }
-    });
-  }
-
   // Tự động quét và đồng bộ kho máy ảo khi khởi động
   setTimeout(() => {
     syncAllMachinesWithGithub().catch(() => {});
@@ -2240,6 +2237,56 @@ async function onMessage(msg) {
     return true;
   }
 
+  // 1b. CÀI ĐẶT GITHUB PAT TOKEN & ĐỔI RUNNER REPO TRỰC TIẾP
+  if (lower.startsWith('!may token') || lower.startsWith('!may pat')) {
+    if (!isRootAdmin(uid, cfg.rootAdmin)) {
+      await msg.reply('🚫 Chỉ có Admin Tối Cao (`946662197168341053`) mới có quyền cài đặt GitHub Token!').catch(() => {});
+      return true;
+    }
+    const tokenVal = text.replace(/^!may\s+(token|pat)\s*/i, '').trim();
+    if (!tokenVal) {
+      await msg.reply('⚠️ Cú pháp: `!may token <github_pat_token>`\nVí dụ: `!may token ghp_xxxx` hoặc `!may token github_pat_xxxx`').catch(() => {});
+      return true;
+    }
+    msg.delete().catch(() => {});
+
+    const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+    const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+    rdp.config = rdp.config || {};
+    rdp.config.token = tokenVal;
+    saveBridgeState(rdp);
+    if (botCtx && typeof botCtx.saveNow === 'function') botCtx.saveNow();
+
+    await msg.channel.send(`✅ **ĐÃ LƯU GITHUB PAT TOKEN THÀNH CÔNG!**\n• Admin: <@${uid}>\n• Đã xóa tin nhắn chứa token khỏi kênh chat để bảo mật.\n• Bây giờ bạn có thể tạo và điều khiển máy ảo bình thường!`).catch(() => {});
+    return true;
+  }
+
+  if (lower.startsWith('!may doirepo') || lower.startsWith('!may repo')) {
+    if (!isRootAdmin(uid, cfg.rootAdmin)) {
+      await msg.reply('🚫 Chỉ có Admin Tối Cao (`946662197168341053`) mới có quyền đổi Runner Repo!').catch(() => {});
+      return true;
+    }
+    const args = text.replace(/^!may\s+(doirepo|repo)\s*/i, '').trim().split(/\s+/).filter(Boolean);
+    const newRepo = args[0];
+    const newToken = args[1];
+    if (!newRepo || !newRepo.includes('/')) {
+      await msg.reply('⚠️ Cú pháp: `!may doirepo <owner/repo_mới> [token_pat]`\nVí dụ: `!may doirepo ohohhoho82-alt/app ghp_xxxx`').catch(() => {});
+      return true;
+    }
+    if (newToken) msg.delete().catch(() => {});
+
+    const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+    const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+    rdp.config = rdp.config || {};
+    rdp.config.runnerRepo = newRepo;
+    if (newToken) rdp.config.token = newToken;
+    saveBridgeState(rdp);
+    if (botCtx && typeof botCtx.saveNow === 'function') botCtx.saveNow();
+
+    await msg.channel.send(`✅ **ĐÃ ĐỔI RUNNER REPO THÀNH CÔNG!**\n• Nơi treo máy: \`${newRepo}\`\n• Kho lưu ổ đĩa gốc: \`${cfg.storageRepo}\`${newToken ? '\n• Đã cập nhật Token mới và xóa tin nhắn bảo mật!' : ''}`).catch(() => {});
+    return true;
+  }
+
   // 2. KIỂM TRA PHÂN QUYỀN TRUY CẬP TỔNG THỂ CHO MỌI LỆNH !may / !ds / !rdp
   if (/^!(may|maymenu|ds|rdp)\b/i.test(text) || text.toLowerCase() === '!ds') {
     if (!isUserAllowed(uid, msg.member, cfg)) {
@@ -2448,7 +2495,9 @@ async function showCreateMachineModal(i, uid) {
 // ----------------- XỬ LÝ SUBMIT MODAL TẠO MÁY ẢO -----------------
 async function handleModalCreateSubmit(i, uid) {
   const D = require('discord.js');
-  await i.deferReply({ flags: D.MessageFlags.Ephemeral });
+  if (!i.deferred && !i.replied) {
+    await i.deferReply({ flags: D.MessageFlags.Ephemeral }).catch(() => {});
+  }
 
   const rawName = i.fields.getTextInputValue('vm_name');
   const rawPin = i.fields.getTextInputValue('vm_pin');
@@ -2461,6 +2510,12 @@ async function handleModalCreateSubmit(i, uid) {
   const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
   const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
   const cfg = getRdpConfig();
+
+  if (!cfg.token) {
+    return await i.editReply({
+      content: `❌ **CHƯA CẤU HÌNH GITHUB PAT TOKEN!**\n• Để tạo file workflow và kích hoạt Actions, bot cần GitHub Personal Access Token (PAT) có quyền \`repo\` & \`workflow\`.\n• **Cách 1 (Nhanh nhất):** Admin chat lệnh sau trong Discord:\n  \`!may token <token_pat_của_bạn>\` *(bot sẽ xóa tin nhắn ngay lập tức để bảo mật)*.\n• **Cách 2:** Mở Web Quản Lý (Tab ⚙️ Cài Đặt) điền vào ô **PAT Token** rồi bấm Lưu.`
+    }).catch(() => {});
+  }
 
   try {
     await i.editReply({ content: `⏳ Đang khởi tạo máy **${cleanName.toUpperCase()}** (${cleanDur}) với PIN \`${cleanPin}\` trên GitHub Actions...` });
@@ -2487,6 +2542,7 @@ async function handleModalCreateSubmit(i, uid) {
 async function onInteraction(i) {
   const D = require('discord.js');
   if (!i.customId || !String(i.customId).startsWith('rdp:')) return;
+  if (i.deferred || i.replied) return;
 
   const uid = i.user.id;
   const cfg = getRdpConfig();

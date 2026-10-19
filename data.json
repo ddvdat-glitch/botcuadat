@@ -1533,7 +1533,7 @@
       {
         "id": "may_dashboard",
         "name": "Bảng điều khiển máy ảo (!may)",
-        "trigger": "^!(may|maymenu|ds)(\\\\s+(menu|ds|dashboard))?$",
+        "trigger": "^!(may|maymenu|ds)\\b",
         "matchType": "regex",
         "type": "menu",
         "menu": "main",
