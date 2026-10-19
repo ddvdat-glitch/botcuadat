@@ -1785,6 +1785,15 @@
                 "type": "toggle_pin",
                 "value": "toggle"
               }
+            },
+            {
+              "label": "Xóa Ổ Đĩa",
+              "emoji": "💽",
+              "style": "danger",
+              "action": {
+                "type": "vm",
+                "value": "delete_disk"
+              }
             }
           ]
         ]

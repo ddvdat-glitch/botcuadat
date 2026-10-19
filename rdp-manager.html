@@ -209,8 +209,9 @@ function tVms(){
             <button class="g sm" onclick="vmControl('${m.name}','start')">▶️ Chạy</button>
             <button class="warn sm" onclick="vmControl('${m.name}','restart')">🔄 Khởi động</button>
             <button class="d sm" onclick="vmControl('${m.name}','stop')">🛑 Tắt</button>
+            <button class="warn sm" onclick="vmControl('${m.name}','delete_disk')" title="Xóa ổ đĩa lưu trữ (VHDX Release) để reset ổ mới tinh">💽 Xóa Ổ</button>
             <button class="s sm" onclick="promptVm('${m.name}')">📝 Prompt</button>
-            <button class="d sm" onclick="vmControl('${m.name}','delete')">🗑️</button>
+            <button class="d sm" onclick="vmControl('${m.name}','delete')" title="Xóa hoàn toàn máy ảo và ổ đĩa">🗑️</button>
           </div>
         </div>
       `).join(''):'<div class="card wide" style="text-align:center;color:var(--mu);padding:40px">Chưa có máy ảo nào trong hệ thống. Bấm tab [➕ Tạo máy mới] để khởi tạo!</div>'}
@@ -219,7 +220,8 @@ function tVms(){
 }
 
 async function vmControl(name, act){
-  if(act==='delete'&&!confirm('Xóa máy ảo '+name+'?'))return;
+  if(act==='delete'&&!confirm('Bạn có chắc chắn muốn xóa HOÀN TOÀN máy ảo '+name+' (bao gồm file workflow và toàn bộ ổ đĩa lưu trữ)?'))return;
+  if(act==='delete_disk'&&!confirm('Bạn có chắc chắn muốn XÓA Ổ ĐĨA lưu trữ của máy '+name+'?\n(Toàn bộ file VHDX trên GitHub Release sẽ bị xóa, khi khởi động lại máy sẽ tạo ổ mới tinh từ đầu)'))return;
   toast('⏳ Đang gửi lệnh '+act+' cho máy '+name+'...');
   try{
     const r=await api('POST','/api/rdp/control-vm?pass='+encodeURIComponent(pw),{machine:name,action:act});

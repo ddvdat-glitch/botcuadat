@@ -1251,20 +1251,12 @@ function buildVmWorkflow(tpl, name, duration, pin, storageRepo) {
                         if (m) { m.status = 'Stopped'; m.isOnline = false; }
                         saveBridgeState(st);
                         return sendJson(200, { ok: true, message: `Đã dừng toàn bộ tiến trình cho máy [${mId}]` });
+                      } else if (action === 'delete_disk') {
+                        const res = await deleteMachineDisk(mId);
+                        return sendJson(200, res);
                       } else if (action === 'delete') {
-                        await cancelWorkflowRuns(runnerRepo, `${mId}.yml`, cfg.token);
-                        try {
-                          const exist = await ghRequest('GET', runnerRepo, `/contents/.github/workflows/${mId}.yml`, null, cfg.token);
-                          if (exist && exist.sha) {
-                            await ghRequest('DELETE', runnerRepo, `/contents/.github/workflows/${mId}.yml`, {
-                              message: `[AISTV] Xóa máy ảo ${mId}`,
-                              sha: exist.sha
-                            }, cfg.token);
-                          }
-                        } catch {}
-                        delete st.machines[mId];
-                        saveBridgeState(st);
-                        return sendJson(200, { ok: true, message: `Đã xóa file workflow và cấu hình máy [${mId}]` });
+                        const res = await deleteMachineFull(mId);
+                        return sendJson(200, res);
                       } else {
                         return sendJson(400, { ok: false, error: 'Hành động không hợp lệ' });
                       }
@@ -2021,6 +2013,121 @@ async function stopMachineWorkflow(name) {
   saveBridgeState(st);
 }
 
+// ----------------- XÓA Ổ ĐĨA & DỮ LIỆU LƯU TRỮ TRÊN STORAGE REPO -----------------
+async function deleteMachineDisk(name) {
+  const cfg = getRdpConfig();
+  const cleanId = String(name || '').toLowerCase().replace(/[^a-z0-9\-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  if (!cleanId) throw new Error('Tên định danh máy không hợp lệ');
+
+  const relTag = `aistv-storage-${cleanId}`;
+  const stateBranch = `aistv-state-${cleanId}`;
+  const details = { releaseDeleted: false, tagDeleted: false, branchDeleted: false };
+
+  // 1. Tìm và xóa Release trên storageRepo
+  try {
+    const rel = await ghRequest('GET', cfg.storageRepo, `/releases/tags/${relTag}`, null, cfg.token);
+    if (rel && rel.id) {
+      await ghRequest('DELETE', cfg.storageRepo, `/releases/${rel.id}`, null, cfg.token);
+      details.releaseDeleted = true;
+    }
+  } catch (e) {}
+
+  // 2. Xóa Git Tag trên storageRepo
+  try {
+    await ghRequest('DELETE', cfg.storageRepo, `/git/refs/tags/${relTag}`, null, cfg.token);
+    details.tagDeleted = true;
+  } catch (e) {}
+
+  // 3. Xóa Git State Branch trên storageRepo
+  try {
+    await ghRequest('DELETE', cfg.storageRepo, `/git/refs/heads/${stateBranch}`, null, cfg.token);
+    details.branchDeleted = true;
+  } catch (e) {}
+
+  // 4. Xóa session file cục bộ nếu có
+  const localCandidates = [
+    path.join(process.cwd(), 'sessions', cleanId),
+    path.join(process.cwd(), 'sessions', `${cleanId}.json`),
+    path.join(process.cwd(), 'temp', cleanId)
+  ];
+  for (const lp of localCandidates) {
+    try {
+      if (fs.existsSync(lp)) {
+        const stat = fs.statSync(lp);
+        if (stat.isDirectory()) fs.rmSync(lp, { recursive: true, force: true });
+        else fs.unlinkSync(lp);
+      }
+    } catch {}
+  }
+
+  // 5. Cập nhật state máy trong RAM
+  const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+  const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+  if (rdp && rdp.machines && rdp.machines[cleanId]) {
+    rdp.machines[cleanId].gvId = null;
+    rdp.machines[cleanId].stardeskId = null;
+    rdp.machines[cleanId].status = 'Stopped';
+    rdp.machines[cleanId].isOnline = false;
+    saveBridgeState(rdp);
+    if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
+  }
+
+  return {
+    ok: true,
+    machineId: cleanId,
+    storageRepo: cfg.storageRepo,
+    relTag,
+    stateBranch,
+    details,
+    message: `Đã xóa ổ đĩa (${relTag}) và dữ liệu trạng thái (${stateBranch}) trên kho lưu trữ ${cfg.storageRepo}!`
+  };
+}
+
+// ----------------- XÓA TOÀN BỘ MÁY ẢO (WORKFLOW + Ổ ĐĨA) -----------------
+async function deleteMachineFull(name) {
+  const cfg = getRdpConfig();
+  const cleanId = String(name || '').toLowerCase().replace(/[^a-z0-9\-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  if (!cleanId) throw new Error('Tên định danh máy không hợp lệ');
+
+  // 1. Dừng workflow nếu đang chạy
+  await cancelWorkflowRuns(cfg.runnerRepo, `${cleanId}.yml`, cfg.token).catch(() => {});
+
+  // 2. Xóa file workflow .github/workflows/<machine>.yml trên runnerRepo
+  try {
+    const curF = await ghRequest('GET', cfg.runnerRepo, `/contents/.github/workflows/${cleanId}.yml`, null, cfg.token);
+    if (curF && curF.sha) {
+      await ghRequest('DELETE', cfg.runnerRepo, `/contents/.github/workflows/${cleanId}.yml`, {
+        message: `[AISTV] Xóa hoàn toàn máy ảo ${cleanId}`,
+        sha: curF.sha
+      }, cfg.token);
+    }
+  } catch (e) {}
+
+  // 3. Xóa ổ đĩa và state trên storageRepo
+  const diskRes = await deleteMachineDisk(cleanId).catch(() => ({ ok: false }));
+
+  // 4. Xóa khỏi RAM và database
+  const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+  const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+  if (rdp && rdp.machines) {
+    delete rdp.machines[cleanId];
+  }
+  if (rdp && rdp.selectedVm) {
+    for (const u of Object.keys(rdp.selectedVm)) {
+      if (rdp.selectedVm[u] === cleanId) delete rdp.selectedVm[u];
+    }
+  }
+  saveBridgeState(rdp);
+  if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
+
+  return {
+    ok: true,
+    machineId: cleanId,
+    diskRes,
+    message: `Đã xóa hoàn toàn máy ảo [${cleanId}] gồm workflow trên ${cfg.runnerRepo} và ổ đĩa trên ${cfg.storageRepo}!`
+  };
+}
+
 // ----------------- QUÉT VÀ NÂNG CẤP WORKFLOW TRỰC TIẾP -----------------
 async function scanAndRebuildWorkflowsDirect(upgradeToLatest = false) {
   const st = loadBridgeState();
@@ -2258,6 +2365,59 @@ async function onMessage(msg) {
       '💡 *Dùng `!may capquyen @user` hoặc `!may thuhoi @user` để quản trị!*'
     ].join('\n');
     await msg.reply(rep).catch(() => {});
+    return true;
+  }
+
+  // 1c. LỆNH XÓA Ổ ĐĨA & XÓA MÁY
+  if (lower.startsWith('!may xoao') || lower.startsWith('!may reset') || lower.startsWith('!may xoao-dia')) {
+    const args = text.replace(/^!may\s+(xoao|reset|xoao-dia)\s*/i, '').trim().split(/\s+/).filter(Boolean);
+    const mName = args[0];
+    if (!mName) {
+      await msg.reply('⚠️ Cú pháp: `!may xoao <tên_máy>`\nVí dụ: `!may xoao dat`\n*Lệnh này sẽ xóa ổ đĩa lưu trữ VHDX trên GitHub Release để máy tạo ổ mới tinh khi chạy lại.*').catch(() => {});
+      return true;
+    }
+    const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+    const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+    const m = (rdp.machines || {})[mName.toLowerCase()];
+    if (!isRootAdmin(uid, cfg.rootAdmin) && (!m || m.ownerId !== uid)) {
+      await msg.reply('🚫 Bạn không có quyền xóa ổ đĩa máy này vì không phải chủ sở hữu hay Admin!').catch(() => {});
+      return true;
+    }
+    const waitMsg = await msg.reply(`⏳ Đang xóa ổ đĩa và dữ liệu máy **${mName.toUpperCase()}** trên Repo Gốc \`${cfg.storageRepo}\`...`).catch(() => {});
+    try {
+      const res = await deleteMachineDisk(mName);
+      if (waitMsg && waitMsg.edit) {
+        await waitMsg.edit(`💽 **ĐÃ XÓA Ổ ĐĨA MÁY [${mName.toUpperCase()}] THÀNH CÔNG!**\n• Kho lưu: \`${res.storageRepo}\`\n• Release tag: \`${res.relTag}\`\n• State branch: \`${res.stateBranch}\`\n✨ Lần tiếp theo khi máy bật lại, hệ thống sẽ tự động tạo ổ đĩa mới tinh!`).catch(() => {});
+      }
+    } catch (e) {
+      if (waitMsg && waitMsg.edit) await waitMsg.edit(`❌ Lỗi khi xóa ổ: ${e.message}`).catch(() => {});
+    }
+    return true;
+  }
+
+  if (lower.startsWith('!may xoamay') || lower.startsWith('!may xoa') || lower.startsWith('!may delete')) {
+    const args = text.replace(/^!may\s+(xoamay|xoa|delete)\s*/i, '').trim().split(/\s+/).filter(Boolean);
+    const mName = args[0];
+    if (!mName) {
+      await msg.reply('⚠️ Cú pháp: `!may xoa <tên_máy>`\nVí dụ: `!may xoa dat`\n*Lệnh này sẽ xóa hoàn toàn máy ảo (hủy runner, xóa workflow yml và dọn sạch ổ đĩa lưu trữ).*').catch(() => {});
+      return true;
+    }
+    const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+    const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+    const m = (rdp.machines || {})[mName.toLowerCase()];
+    if (!isRootAdmin(uid, cfg.rootAdmin) && (!m || m.ownerId !== uid)) {
+      await msg.reply('🚫 Bạn không có quyền xóa máy này vì không phải chủ sở hữu hay Admin!').catch(() => {});
+      return true;
+    }
+    const waitMsg = await msg.reply(`⏳ Đang xóa hoàn toàn máy ảo **${mName.toUpperCase()}** (workflow trên \`${cfg.runnerRepo}\` & ổ đĩa trên \`${cfg.storageRepo}\`)...`).catch(() => {});
+    try {
+      const res = await deleteMachineFull(mName);
+      if (waitMsg && waitMsg.edit) {
+        await waitMsg.edit(`🗑️ **ĐÃ XÓA TOÀN BỘ MÁY ẢO [${mName.toUpperCase()}] THÀNH CÔNG!**\n• Đã hủy workflow đang chạy trên \`${cfg.runnerRepo}\`.\n• Đã xóa file \`.github/workflows/${mName.toLowerCase()}.yml\`.\n• Đã xóa ổ đĩa và dữ liệu lưu trữ trên \`${cfg.storageRepo}\`.\n• Đã dọn dẹp khỏi danh sách máy!`).catch(() => {});
+      }
+    } catch (e) {
+      if (waitMsg && waitMsg.edit) await waitMsg.edit(`❌ Lỗi khi xóa máy: ${e.message}`).catch(() => {});
+    }
     return true;
   }
 
@@ -2830,28 +2990,29 @@ async function onButton(i) {
             if (curM) { curM.status = 'completed'; curM.isOnline = false; }
           } else if (actVal === 'reload_info') {
             await syncAllMachinesWithGithub();
+          } else if (actVal === 'delete_disk') {
+            if (isRoot || curM?.ownerId === uid) {
+              try {
+                const res = await deleteMachineDisk(curKey);
+                await i.followUp({
+                  content: `💽 **ĐÃ XÓA Ổ ĐĨA MÁY [${(curM?.displayName || curKey).toUpperCase()}] THÀNH CÔNG!**\n• Kho lưu: \`${res.storageRepo}\`\n• Release ổ đĩa: \`${res.relTag}\`\n• Nhánh trạng thái: \`${res.stateBranch}\`\n✨ Lần khởi động tiếp theo, hệ thống sẽ tự động tạo ổ mới tinh từ đầu!`,
+                  flags: D.MessageFlags.Ephemeral
+                }).catch(() => {});
+              } catch (err) {
+                await i.followUp({ content: `❌ Lỗi khi xóa ổ đĩa máy ${curKey}: ${err.message}`, flags: D.MessageFlags.Ephemeral }).catch(() => {});
+              }
+            } else {
+              await i.followUp({ content: `🚫 Bạn không có quyền xóa ổ đĩa máy này vì không phải chủ sở hữu hay Admin!`, flags: D.MessageFlags.Ephemeral }).catch(() => {});
+            }
           } else if (actVal === 'delete') {
             if (isRoot || curM?.ownerId === uid) {
-              await cancelWorkflowRuns(cfg.runnerRepo, `${curKey}.yml`, cfg.token);
               try {
-                const curF = await ghRequest('GET', cfg.runnerRepo, `/contents/.github/workflows/${curKey}.yml`, null, cfg.token);
-                if (curF && curF.sha) {
-                  await ghRequest('DELETE', cfg.runnerRepo, `/contents/.github/workflows/${curKey}.yml`, {
-                    message: `[AISTV] Xóa máy ảo ${curKey}`,
-                    sha: curF.sha
-                  }, cfg.token);
-                }
-              } catch (e) {
-                if (botCtx && typeof botCtx.log === 'function') botCtx.log('warn', `Delete workflow ${curKey}.yml: ${e.message}`);
+                await deleteMachineFull(curKey);
+                activeMenu = rdp.menus.find(m => m.id === 'main') || activeMenu;
+                await i.followUp({ content: `🗑️ Đã xóa HOÀN TOÀN máy ảo **${(curM?.displayName || curKey).toUpperCase()}** (gồm file workflow và ổ đĩa lưu trữ)!`, flags: D.MessageFlags.Ephemeral }).catch(() => {});
+              } catch (err) {
+                await i.followUp({ content: `❌ Lỗi xóa máy ảo: ${err.message}`, flags: D.MessageFlags.Ephemeral }).catch(() => {});
               }
-              delete rdp.machines[curKey];
-              if (rdp.selectedVm && rdp.selectedVm[uid] === curKey) {
-                delete rdp.selectedVm[uid];
-              }
-              if (botCtx && typeof botCtx.saveSoon === 'function') botCtx.saveSoon();
-              saveBridgeState(rdp);
-              activeMenu = rdp.menus.find(m => m.id === 'main') || activeMenu;
-              await i.followUp({ content: `🗑️ Đã xóa máy ảo **${(curM?.displayName || curKey).toUpperCase()}** thành công!`, flags: D.MessageFlags.Ephemeral }).catch(() => {});
             } else {
               await i.followUp({ content: `🚫 Bạn không có quyền xóa máy ảo này vì không phải chủ sở hữu!`, flags: D.MessageFlags.Ephemeral }).catch(() => {});
             }
@@ -2922,6 +3083,8 @@ module.exports = {
   createMachineWorkflow,
   restartMachineWorkflow,
   stopMachineWorkflow,
+  deleteMachineDisk,
+  deleteMachineFull,
   scanAndRebuildWorkflowsDirect,
   syncAllMachinesWithGithub,
   getRdpVars,
