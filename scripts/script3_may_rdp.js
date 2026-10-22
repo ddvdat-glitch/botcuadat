@@ -425,6 +425,12 @@ if (ev === 'button') {
 // XỬ LÝ SỰ KIỆN: LỆNH CHAT (!may ...)
 // ============================================================================
 const raw = String(ctx.content || (ctx.message && ctx.message.content) || ctx.rest || '').trim();
+
+// BẢO VỆ CHẶT CHẼ: Script này CHỈ xử lý lệnh máy ảo (!may, !maymenu, !thongtin, !rdp, !ds).
+// Mọi tin nhắn khác (@bot, !ai, on, of, !tx, !tt...) TUYỆT ĐỐI KHÔNG CAN THIỆP ĐỂ CHO BOT TỰ CHẠY.
+if (!/^!(may|maymenu|thongtin|rdp)\b/i.test(raw) && raw.toLowerCase() !== '!ds') {
+  return;
+}
 let words = (ctx.args && Array.isArray(ctx.args) && ctx.args.length)
   ? [...ctx.args]
   : raw.split(/\s+/).filter(Boolean);

@@ -2737,6 +2737,12 @@ async function onMessage(msg) {
 
   const trimmed = text.trim();
   const lower = trimmed.toLowerCase();
+
+  // STRICT GUARD: RDP Bridge TUYỆT ĐỐI CHỈ nhận các lệnh liên quan đến máy ảo (!may, !rdp, !maymenu, !dsmay, hoặc !ds).
+  // Mọi tin nhắn khác (@bot, !ai, on, of, !tx, !tt, chat thông thường...) LẬP TỨC trả về false để các module khác xử lý.
+  const isRdp = /^!(may|maymenu|rdp|dsmay)\b/i.test(trimmed) || lower === '!ds';
+  if (!isRdp) return false;
+
   const uid = msg.author.id;
   const cfg = getRdpConfig();
 
@@ -3264,11 +3270,16 @@ async function onMessage(msg) {
 
   for (const cmd of rdp.commands) {
     if (cmd.enabled === false || !cmd.trigger) continue;
+    const trig = (cmd.trigger || '').trim();
+    if (!trig) continue;
+    // Bắt buộc trigger phải là lệnh máy ảo, không cho phép trigger tự do bắt lệnh khác
+    if (!/^(!may|!rdp|!maymenu|!ds|\^!(may|maymenu|ds|rdp))/i.test(trig)) continue;
+
     let isMatch = false;
     if (botCtx && typeof botCtx.matchText === 'function') {
       isMatch = botCtx.matchText(cmd, text);
     } else {
-      const t = text.toLowerCase(), k = (cmd.trigger || '').trim().toLowerCase();
+      const t = text.toLowerCase(), k = trig.toLowerCase();
       if (cmd.matchType === 'exact') isMatch = (t === k);
       else if (cmd.matchType === 'startsWith') isMatch = t.startsWith(k);
       else if (cmd.matchType === 'regex') { try { isMatch = new RegExp(cmd.trigger, 'i').test(text); } catch {} }
