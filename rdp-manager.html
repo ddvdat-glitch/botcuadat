@@ -190,6 +190,7 @@ function tVms(){
       <div class="r">
         <button class="s sm" onclick="pinMask=!pinMask;draw()">${pinMask?'👁️ Hiện PIN':'🙈 Ẩn PIN'}</button>
         <button class="s sm" onclick="init()">🔄 Làm mới</button>
+        <button class="s sm" onclick="doSyncAllToRunner()" style="background:#8b5cf6;color:#fff">🔄 Đồng Bộ Sang Repo Mới</button>
       </div>
     </div>
     <div class="grid-vms">
@@ -781,19 +782,27 @@ async function sendMenu(){const m=T.menus[MI];if(!SENDCH)return toast('Chọn k�
 // ================= TAB 4: QUÉT & TÁI TẠO YML =================
 let scanList=[];
 function tScan(){
-  return `<div class="hint">Quét toàn bộ tệp <code>.github/workflows/*.yml</code> trên Repo Treo Máy (<code>${esc(T.config?.runnerRepo||'')}</code>). Hệ thống sẽ trích xuất tên máy, thời lượng, mã PIN và cho phép bạn nâng cấp hàng loạt sang bản <code>taomay.yml</code> mới nhất (GameViewer 4.43.1 + StarDesk 1.5.3 + DPAPI session + dọn dẹp SID).</div>
-  <p class="r"><button onclick="doScan()">🔍 Quét Ngay Kho Treo Máy</button><button class="g" onclick="doRebuild('all')">🚀 Nâng Cấp Toàn Bộ Theo Bản Mới Nhất</button><span id="sc_msg" class="mu"></span></p>
-  <table class="t"><thead><tr><th>Tệp Workflow</th><th>Tên Máy</th><th>Thời Lượng</th><th>Mã PIN</th><th>Phiên Bản Template</th><th>Lần Chạy Gần Nhất</th><th>Thao Tác</th></tr></thead>
+  return `<div class="hint">Quét toàn bộ tệp <code>.github/workflows/*.yml</code> trên Repo Treo Máy (<code>${esc(T.config?.runnerRepo||'')}</code>). Hệ thống sẽ trích xuất tên máy, thời lượng, mã PIN, tự động nhận diện và phục hồi các máy cũ còn trong dữ liệu sang Repo mới, đồng thời cho phép bạn nâng cấp hàng loạt sang bản <code>taomay.yml</code> mới nhất.</div>
+  <p class="r">
+    <button onclick="doScan()">🔍 Quét Ngay Kho Treo Máy</button>
+    <button class="b" onclick="doSyncAllToRunner()" style="background:#8b5cf6;color:#fff">🔄 Đồng Bộ Toàn Bộ Máy Cũ Sang Repo Mới</button>
+    <button class="g" onclick="doRebuild('all')">🚀 Nâng Cấp Toàn Bộ Theo Bản Mới Nhất</button>
+    <span id="sc_msg" class="mu"></span>
+  </p>
+  <table class="t"><thead><tr><th>Tệp Workflow</th><th>Tên Máy</th><th>Thời Lượng</th><th>Mã PIN</th><th>Trạng Thái / Template</th><th>Lần Chạy Gần Nhất</th><th>Thao Tác</th></tr></thead>
   <tbody>${scanList.length?scanList.map(w=>`
     <tr>
       <td><code>${esc(w.file)}</code></td>
       <td><b>${esc(w.displayName)}</b> (${esc(w.machineId)})</td>
       <td>${esc(w.duration)}</td>
       <td><code>${esc(w.pin)}</code></td>
-      <td>${w.isLatestTemplate?'<span class="badge on">✅ Mới nhất</span>':'<span class="badge wait">⚠️ Cần nâng cấp</span>'}</td>
+      <td>${w.needSync?'<span class="badge danger" style="background:#dc2626">⚠️ Chưa đẩy lên Repo mới</span>':(w.isLatestTemplate?'<span class="badge on">✅ Mới nhất</span>':'<span class="badge wait">⚠️ Cần nâng cấp</span>')}</td>
       <td>${w.lastRun?`<a href="${esc(w.lastRun.runUrl)}" target="_blank" style="color:#38bdf8">${w.lastRun.status} (${w.lastRun.conclusion||'running'})</a>`:'<span class="mu">Chưa chạy</span>'}</td>
-      <td><button class="s sm" onclick="doRebuild('${w.machineId}')">🛠️ Nâng cấp</button> <button class="g sm" onclick="vmControl('${w.machineId}','start')">▶️ Chạy</button></td>
-    </tr>`).join(''):'<tr><td colspan="7" style="text-align:center;color:var(--mu)">Bấm "Quét Ngay" để quét các file trên Runner Repo.</td></tr>'}
+      <td>
+        ${w.needSync?`<button class="g sm" onclick="syncSingleVm('${w.machineId}')">📤 Đẩy sang Repo</button>`:`<button class="s sm" onclick="doRebuild('${w.machineId}')">🛠️ Nâng cấp</button>`}
+        <button class="g sm" onclick="vmControl('${w.machineId}','start')">▶️ Chạy</button>
+      </td>
+    </tr>`).join(''):'<tr><td colspan="7" style="text-align:center;color:var(--mu)">Bấm "Quét Ngay" để quét hoặc "Đồng Bộ Toàn Bộ Máy Cũ Sang Repo Mới" để đẩy toàn bộ máy sang Repo mới.</td></tr>'}
   </tbody></table>`;
 }
 
@@ -802,9 +811,46 @@ async function doScan(){
   try{
     const r=await api('GET','/api/rdp/scan-workflows?pass='+encodeURIComponent(pw));
     scanList=r.workflows||[];
-    $('sc_msg').textContent=`✅ Đã quét ${scanList.length} máy trên ${r.runnerRepo}`;
+    const needSyncCount = scanList.filter(x=>x.needSync).length;
+    $('sc_msg').textContent=`✅ Đã nhận diện ${scanList.length} máy trên ${r.runnerRepo}${needSyncCount > 0 ? ` (${needSyncCount} máy cần đồng bộ sang repo mới)` : ''}`;
     draw();
   }catch(e){$('sc_msg').textContent='❌ '+e.message}
+}
+
+async function doSyncAllToRunner(){
+  const curRun = T.config?.runnerRepo || 'ohohhoho82-alt/app';
+  const target = prompt('Nhập tên Runner Repo mới muốn chuyển toàn bộ máy sang (để trống để dùng: ' + curRun + '):', curRun);
+  if (target === null) return;
+  const repoToUse = target.trim() || curRun;
+  if (!confirm('Đồng bộ TOÀN BỘ máy ảo từ Database sang Runner Repo [' + repoToUse + ']?\n\n• Toàn bộ file workflow của các máy cũ sẽ được tạo/cập nhật sang repo mới\n• Giữ nguyên ổ đĩa VHDX trên Storage Repo và thông số cấu hình\n• Khắc phục hoàn toàn lỗi treo máy cũ khi thay acc GitHub treo!')) return;
+
+  $('sc_msg').textContent = '⏳ Đang đồng bộ toàn bộ máy cũ sang ' + repoToUse + '...';
+  toast('⏳ Đang đồng bộ toàn bộ máy sang ' + repoToUse + '...');
+  try {
+    const r = await api('POST', '/api/rdp/sync-all-to-runner?pass=' + encodeURIComponent(pw), { runnerRepo: repoToUse });
+    toast('✔ Đã đồng bộ thành công ' + r.syncedCount + ' máy sang ' + r.runnerRepo + '!');
+    $('sc_msg').textContent = '✅ Đã đồng bộ ' + r.syncedCount + ' máy sang ' + r.runnerRepo;
+    await init();
+    await doScan();
+  } catch (e) {
+    $('sc_msg').textContent = '❌ ' + e.message;
+    toast('❌ ' + e.message, 5000);
+  }
+}
+
+async function syncSingleVm(mId){
+  toast('⏳ Đang tạo và commit workflow máy ' + mId + ' sang Runner Repo...');
+  try {
+    const r = await api('POST', '/api/rdp/create-vm?pass=' + encodeURIComponent(pw), {
+      name: mId,
+      runnerRepo: T.config?.runnerRepo,
+      storageRepo: T.config?.storageRepo
+    });
+    toast('✔ Đã đẩy workflow máy ' + mId + ' sang repo mới!');
+    await doScan();
+  } catch (e) {
+    toast('❌ ' + e.message, 4000);
+  }
 }
 
 async function doRebuild(mName){

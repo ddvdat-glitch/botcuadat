@@ -1013,13 +1013,19 @@ const origCreateServer = http.createServer;
                     const st = loadBridgeState();
                     const cfg = getRdpConfig();
                     try {
-                      const contents = await ghRequest('GET', cfg.runnerRepo, '/contents/.github/workflows', null, cfg.token);
-                      if (!Array.isArray(contents)) return sendJson(400, { ok: false, error: `Không đọc được thư mục .github/workflows trên ${cfg.runnerRepo}` });
+                      let contents = [];
+                      try {
+                        contents = await ghRequest('GET', cfg.runnerRepo, '/contents/.github/workflows', null, cfg.token);
+                      } catch (err) {
+                        contents = [];
+                      }
+                      if (!Array.isArray(contents)) contents = [];
                       const ymlFiles = contents.filter(f => f.type === 'file' && /\.(ya?ml)$/i.test(f.name));
                       const ignored = ['taomay.yml', 'taomay.yaml', 'taomaygoc.yml', 'bot.yml', 'botcuadat.yml'];
                       const machineFiles = ymlFiles.filter(f => !ignored.includes(f.name.toLowerCase()));
 
                       const list = [];
+                      const foundFileIds = new Set();
                       st.machines = st.machines || {};
 
                       for (const f of machineFiles) {
@@ -1032,13 +1038,19 @@ const origCreateServer = http.createServer;
                           const durM = rawYml.match(/duration:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
                           const pinM = rawYml.match(/(?:pin_code|fixed_password):[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
                           const storageM = rawYml.match(/storage_repo:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+                          const ownerIdM = rawYml.match(/#\s*OWNER_ID:\s*([0-9]{16,21})/i) || rawYml.match(/OWNER_ID:\s*['"]?([0-9]{16,21})['"]?/i);
+                          const ownerNameM = rawYml.match(/#\s*OWNER_NAME:\s*([^\r\n]+)/i) || rawYml.match(/OWNER_NAME:\s*['"]?([^'"\r\n]+)['"]?/i);
 
                           const fileBaseId = f.name.replace(/\.(ya?ml)$/i, '').toLowerCase();
-      const mId = fileBaseId;
+                          const mId = fileBaseId;
+                          foundFileIds.add(mId);
+
                           const dName = (nameM && nameM[1]) || `Máy ${mId}`;
                           const dur = (durM && durM[1]) || '5h00m';
                           const pin = (pinM && pinM[1]) || 'Aistv2026';
                           const stRepo = (storageM && storageM[1]) || cfg.storageRepo;
+                          const foundOwnerId = (ownerIdM && ownerIdM[1]) || '';
+                          const foundOwnerName = (ownerNameM && ownerNameM[1].trim()) || '';
 
                           const isLatest = rawYml.includes('uuyc_4.43.1.exe') && rawYml.includes('ProtectedData::Protect') && rawYml.includes('StarDesk_1.5.3.exe');
 
@@ -1050,6 +1062,13 @@ const origCreateServer = http.createServer;
                           cur.storageRepo = stRepo;
                           cur.repo = cfg.runnerRepo;
                           cur.isLatestTemplate = isLatest;
+
+                          if (!cur.ownerId && foundOwnerId) cur.ownerId = foundOwnerId;
+                          if (!cur.owner && foundOwnerName) cur.owner = foundOwnerName;
+                          if (!cur.ownerId) {
+                            cur.ownerId = cfg.rootAdmin;
+                            cur.owner = 'Root Admin';
+                          }
 
                           let lastRun = null;
                           try {
@@ -1084,8 +1103,42 @@ const origCreateServer = http.createServer;
                           });
                         } catch {}
                       }
+
+                      // TỰ ĐỘNG BỔ SUNG CÁC MÁY CÒN TRONG DATA NHƯNG CHƯA CÓ TRÊN RUNNER REPO MỚI
+                      for (const mId of Object.keys(st.machines)) {
+                        if (!foundFileIds.has(mId.toLowerCase())) {
+                          const curM = st.machines[mId];
+                          list.push({
+                            file: `${mId}.yml (Chưa đẩy lên repo mới)`,
+                            path: `.github/workflows/${mId}.yml`,
+                            machineId: mId,
+                            displayName: curM.displayName || `Máy ${mId.toUpperCase()}`,
+                            duration: curM.duration || '5h00m',
+                            pin: curM.gvPin || 'Aistv2026',
+                            storageRepo: curM.storageRepo || cfg.storageRepo,
+                            isLatestTemplate: false,
+                            lastRun: null,
+                            needSync: true
+                          });
+                        }
+                      }
+
                       saveBridgeState(st);
                       return sendJson(200, { ok: true, runnerRepo: cfg.runnerRepo, storageRepo: cfg.storageRepo, workflows: list });
+                    } catch (err) {
+                      return sendJson(500, { ok: false, error: err.message });
+                    }
+                  }
+
+                  // --------------------------------------------------------------------------
+                  // 5.1b API: ĐỒNG BỘ TOÀN BỘ MÁY TỪ DATA SANG RUNNER REPO MỚI
+                  // --------------------------------------------------------------------------
+                  if (u === '/api/rdp/sync-all-to-runner' && req.method === 'POST') {
+                    if (!checkAuth(req, body)) return sendJson(401, { ok: false, error: 'Sai mật khẩu Admin' });
+                    try {
+                      const targetRepo = body.runnerRepo || body.repo;
+                      const resSync = await syncAllMachinesToRunnerRepo(targetRepo);
+                      return sendJson(200, resSync);
                     } catch (err) {
                       return sendJson(500, { ok: false, error: err.message });
                     }
@@ -1274,15 +1327,17 @@ const origCreateServer = http.createServer;
 
                     try {
                       if (action === 'start') {
+                        await ensureMachineWorkflowOnRunner(mId, runnerRepo);
                         await dispatchWorkflow(runnerRepo, `${mId}.yml`, {}, cfg.token);
-                        if (m) { m.status = 'queued'; m.isOnline = true; }
+                        if (m) { m.status = 'queued'; m.isOnline = true; m.repo = runnerRepo; }
                         saveBridgeState(st);
                         return sendJson(200, { ok: true, message: `Đã gửi lệnh chạy phiên mới cho máy [${mId}]` });
                       } else if (action === 'restart') {
-                        await cancelWorkflowRuns(runnerRepo, `${mId}.yml`, cfg.token);
+                        await cancelWorkflowRuns(runnerRepo, `${mId}.yml`, cfg.token).catch(() => {});
+                        await ensureMachineWorkflowOnRunner(mId, runnerRepo);
                         await new Promise(r => setTimeout(r, 2000));
                         await dispatchWorkflow(runnerRepo, `${mId}.yml`, {}, cfg.token);
-                        if (m) { m.status = 'queued'; m.isOnline = true; }
+                        if (m) { m.status = 'queued'; m.isOnline = true; m.repo = runnerRepo; }
                         saveBridgeState(st);
                         return sendJson(200, { ok: true, message: `Đã hủy phiên cũ và khởi chạy phiên mới cho [${mId}]` });
                       } else if (action === 'stop') {
@@ -2079,26 +2134,265 @@ async function createMachineWorkflow(name, duration, pin, uid, displayName, owne
   return st.machines[cleanName];
 }
 
-// ----------------- KHỞI ĐỘNG LẠI MÁY -----------------
-async function restartMachineWorkflow(name) {
+// ----------------- ĐẢM BẢO WORKFLOW CỦA MÁY TỒN TẠI TRÊN RUNNER REPO -----------------
+async function ensureMachineWorkflowOnRunner(name, customTargetRepo = null) {
+  const cleanId = String(name || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || 'may-1';
+
   const st = loadBridgeState();
   const cfg = getRdpConfig();
-  const m = (st.machines || {})[name];
-  await cancelWorkflowRuns(cfg.runnerRepo, `${name}.yml`, cfg.token);
+  const runnerRepo = (customTargetRepo && String(customTargetRepo).trim()) || cfg.runnerRepo;
+  const filePath = `.github/workflows/${cleanId}.yml`;
+
+  let sha = undefined;
+  let exists = false;
+  try {
+    const cur = await ghRequest('GET', runnerRepo, `/contents/${filePath}`, null, cfg.token);
+    if (cur && cur.sha) {
+      sha = cur.sha;
+      exists = true;
+    }
+  } catch (err) {}
+
+  if (exists && sha) {
+    return { ok: true, existed: true, sha };
+  }
+
+  // File chưa có trên runnerRepo -> Tự tạo từ dữ liệu data.json và template taomay.yml
+  let tpl = loadTaomayTemplate();
+  if (!tpl) {
+    try {
+      const f = await ghRequest('GET', cfg.storageRepo, '/contents/taomay.yml', null, cfg.token);
+      if (f && f.content) tpl = Buffer.from(f.content.replace(/\s+/g, ''), 'base64').toString('utf8');
+    } catch {}
+  }
+  if (!tpl) throw new Error('Không tìm thấy file mẫu taomay.yml để tự động khởi tạo workflow');
+
+  const curM = (st.machines && st.machines[cleanId]) || {};
+  const duration = curM.duration || '5h00m';
+  const pin = curM.gvPin || 'Aistv2026';
+  const storageRepo = curM.storageRepo || cfg.storageRepo;
+  const realOwnerId = curM.ownerId || cfg.rootAdmin;
+  const realOwner = curM.owner || (realOwnerId === cfg.rootAdmin ? 'Root Admin' : `<@${realOwnerId}>`);
+
+  const wfContent = buildVmWorkflow(tpl, cleanId, duration, pin, storageRepo, realOwnerId, realOwner);
+  const putRes = await ghRequest('PUT', runnerRepo, `/contents/${filePath}`, {
+    message: `[AISTV] Tự động đồng bộ / phục hồi máy ảo ${cleanId} sang Runner Repo mới (Chủ: ${realOwner})`,
+    content: Buffer.from(wfContent, 'utf8').toString('base64'),
+    sha
+  }, cfg.token);
+
+  if (st.machines && st.machines[cleanId]) {
+    st.machines[cleanId].repo = runnerRepo;
+    st.machines[cleanId].storageRepo = storageRepo;
+    st.machines[cleanId].isLatestTemplate = true;
+    saveBridgeState(st);
+  }
+
   await new Promise(r => setTimeout(r, 2000));
-  await dispatchWorkflow(cfg.runnerRepo, `${name}.yml`, {
-    machine_id: name,
-    display_name: (m && m.displayName) || `Máy ${String(name).toUpperCase()}`,
+  return { ok: true, existed: false, created: true, sha: putRes && putRes.content && putRes.content.sha };
+}
+
+// ----------------- BẬT MÁY (START) -----------------
+async function startMachineWorkflow(name) {
+  const st = loadBridgeState();
+  const cfg = getRdpConfig();
+  const cleanId = String(name || '').toLowerCase().replace(/[^a-z0-9\-]/g, '');
+  const m = (st.machines || {})[cleanId];
+  const runnerRepo = cfg.runnerRepo;
+
+  await ensureMachineWorkflowOnRunner(cleanId, runnerRepo);
+  await dispatchWorkflow(runnerRepo, `${cleanId}.yml`, {
+    machine_id: cleanId,
+    display_name: (m && m.displayName) || `Máy ${cleanId.toUpperCase()}`,
     duration: normalizeDuration(m && m.duration),
     pin_code: (m && m.gvPin) || 'Aistv2026',
-    storage_repo: cfg.storageRepo
-  }, cfg.token);
+    storage_repo: (m && m.storageRepo) || cfg.storageRepo
+  }, cfg.runnerToken || cfg.token);
+
   if (m) {
     m.status = 'in_progress';
     m.isOnline = true;
     m.startedAt = Date.now();
+    m.repo = runnerRepo;
   }
   saveBridgeState(st);
+  return m;
+}
+
+// ----------------- KHỞI ĐỘNG LẠI MÁY (RESTART) -----------------
+async function restartMachineWorkflow(name) {
+  const st = loadBridgeState();
+  const cfg = getRdpConfig();
+  const cleanId = String(name || '').toLowerCase().replace(/[^a-z0-9\-]/g, '');
+  const m = (st.machines || {})[cleanId];
+  const runnerRepo = cfg.runnerRepo;
+
+  await cancelWorkflowRuns(runnerRepo, `${cleanId}.yml`, cfg.token).catch(() => {});
+  await ensureMachineWorkflowOnRunner(cleanId, runnerRepo);
+  await new Promise(r => setTimeout(r, 2000));
+  await dispatchWorkflow(runnerRepo, `${cleanId}.yml`, {
+    machine_id: cleanId,
+    display_name: (m && m.displayName) || `Máy ${String(cleanId).toUpperCase()}`,
+    duration: normalizeDuration(m && m.duration),
+    pin_code: (m && m.gvPin) || 'Aistv2026',
+    storage_repo: (m && m.storageRepo) || cfg.storageRepo
+  }, cfg.runnerToken || cfg.token);
+
+  if (m) {
+    m.status = 'in_progress';
+    m.isOnline = true;
+    m.startedAt = Date.now();
+    m.repo = runnerRepo;
+  }
+  saveBridgeState(st);
+  return m;
+}
+
+// ----------------- ĐỒNG BỘ TOÀN BỘ MÁY CŨ SANG RUNNER REPO MỚI -----------------
+async function syncAllMachinesToRunnerRepo(targetRunnerRepo = null) {
+  const st = loadBridgeState();
+  const cfg = getRdpConfig();
+  const runnerRepo = (targetRunnerRepo && String(targetRunnerRepo).trim()) || cfg.runnerRepo;
+  if (!runnerRepo || !runnerRepo.includes('/')) {
+    throw new Error('Chưa cấu hình Runner Repo hợp lệ (dạng owner/repo)');
+  }
+  st.machines = st.machines || {};
+
+  // 1. Tải template taomay.yml
+  let tpl = loadTaomayTemplate();
+  if (!tpl) {
+    try {
+      const f = await ghRequest('GET', cfg.storageRepo, '/contents/taomay.yml', null, cfg.token);
+      if (f && f.content) tpl = Buffer.from(f.content.replace(/\s+/g, ''), 'base64').toString('utf8');
+    } catch {}
+  }
+  if (!tpl) throw new Error('Không tìm thấy file mẫu taomay.yml để đồng bộ máy sang repo mới');
+
+  // 2. Đảm bảo file template taomay.yml có mặt trên runnerRepo
+  try {
+    let tplSha = undefined;
+    try {
+      const curTpl = await ghRequest('GET', runnerRepo, '/contents/.github/workflows/taomay.yml', null, cfg.token);
+      if (curTpl && curTpl.sha) tplSha = curTpl.sha;
+    } catch {}
+    await ghRequest('PUT', runnerRepo, '/contents/.github/workflows/taomay.yml', {
+      message: '[AISTV] Đồng bộ file template taomay.yml sang Runner Repo mới',
+      content: Buffer.from(tpl, 'utf8').toString('base64'),
+      sha: tplSha
+    }, cfg.token);
+  } catch (err) {
+    console.warn('Lỗi khi đẩy taomay.yml lên runner repo:', err.message);
+  }
+
+  // 3. Đọc danh sách workflow file hiện có trên runnerRepo để lấy sha (tránh conflict sha)
+  const existingWorkflows = {};
+  try {
+    const contents = await ghRequest('GET', runnerRepo, '/contents/.github/workflows', null, cfg.token);
+    if (Array.isArray(contents)) {
+      for (const item of contents) {
+        if (item.type === 'file') {
+          existingWorkflows[item.name.toLowerCase()] = item;
+        }
+      }
+    }
+  } catch (err) {}
+
+  // 4. Đồng bộ TOÀN BỘ MÁY TỪ st.machines (trong data.json) sang runnerRepo
+  const machineKeys = Object.keys(st.machines);
+  const syncedList = [];
+  const errorsList = [];
+
+  for (const mId of machineKeys) {
+    const curM = st.machines[mId];
+    if (!curM) continue;
+    try {
+      const fileName = `${mId}.yml`;
+      const curFile = existingWorkflows[fileName.toLowerCase()];
+      const sha = curFile ? curFile.sha : undefined;
+
+      const duration = curM.duration || '5h00m';
+      const pin = curM.gvPin || 'Aistv2026';
+      const storageRepo = curM.storageRepo || cfg.storageRepo;
+      const realOwnerId = curM.ownerId || cfg.rootAdmin;
+      const realOwner = curM.owner || (realOwnerId === cfg.rootAdmin ? 'Root Admin' : `<@${realOwnerId}>`);
+
+      const wfContent = buildVmWorkflow(tpl, mId, duration, pin, storageRepo, realOwnerId, realOwner);
+      const b64 = Buffer.from(wfContent, 'utf8').toString('base64');
+
+      await ghRequest('PUT', runnerRepo, `/contents/.github/workflows/${fileName}`, {
+        message: `[AISTV] Đồng bộ máy cũ ${mId} (${duration}, PIN: ${pin}, Chủ: ${realOwner}) sang Runner Repo mới`,
+        content: b64,
+        sha
+      }, cfg.token);
+
+      curM.repo = runnerRepo;
+      curM.storageRepo = storageRepo;
+      curM.isLatestTemplate = true;
+      curM.syncedAt = Date.now();
+      syncedList.push(mId);
+
+      await new Promise(r => setTimeout(r, 600));
+    } catch (err) {
+      errorsList.push({ machineId: mId, error: err.message });
+    }
+  }
+
+  // 5. Nếu trên runnerRepo có các file workflow chưa có trong st.machines -> Nhận diện thêm
+  let importedCount = 0;
+  for (const fileName of Object.keys(existingWorkflows)) {
+    const ignored = ['taomay.yml', 'taomay.yaml', 'taomaygoc.yml', 'bot.yml', 'botcuadat.yml'];
+    if (ignored.includes(fileName)) continue;
+    const mId = fileName.replace(/\.(ya?ml)$/i, '').toLowerCase();
+    if (!st.machines[mId]) {
+      try {
+        const fDetail = await ghRequest('GET', runnerRepo, `/contents/.github/workflows/${fileName}`, null, cfg.token);
+        if (fDetail && fDetail.content) {
+          const rawYml = Buffer.from(fDetail.content.replace(/\s+/g, ''), 'base64').toString('utf8');
+          const idM = rawYml.match(/machine_id:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+          const nameM = rawYml.match(/display_name:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+          const durM = rawYml.match(/duration:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+          const pinM = rawYml.match(/(?:pin_code|fixed_password):[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+          const storageM = rawYml.match(/storage_repo:[\s\S]*?default:\s*['"]([^'"]+)['"]/i);
+          const ownerIdM = rawYml.match(/#\s*OWNER_ID:\s*([0-9]{16,21})/i) || rawYml.match(/OWNER_ID:\s*['"]?([0-9]{16,21})['"]?/i);
+          const ownerNameM = rawYml.match(/#\s*OWNER_NAME:\s*([^\r\n]+)/i) || rawYml.match(/OWNER_NAME:\s*['"]?([^'"\r\n]+)['"]?/i);
+
+          st.machines[mId] = {
+            name: mId,
+            displayName: (nameM && nameM[1]) || `Máy ${mId.toUpperCase()}`,
+            duration: (durM && durM[1]) || '5h00m',
+            gvPin: (pinM && pinM[1]) || 'Aistv2026',
+            ownerId: (ownerIdM && ownerIdM[1]) || cfg.rootAdmin,
+            owner: (ownerNameM && ownerNameM[1].trim()) || 'Root Admin',
+            repo: runnerRepo,
+            storageRepo: (storageM && storageM[1]) || cfg.storageRepo,
+            created: Date.now()
+          };
+          importedCount++;
+        }
+      } catch {}
+    }
+  }
+
+  st.config = st.config || {};
+  st.config.runnerRepo = runnerRepo;
+  saveBridgeState(st);
+  if (botCtx && typeof botCtx.saveNow === 'function') botCtx.saveNow();
+
+  return {
+    ok: true,
+    runnerRepo,
+    storageRepo: cfg.storageRepo,
+    totalInData: machineKeys.length,
+    syncedCount: syncedList.length,
+    syncedMachines: syncedList,
+    importedCount,
+    errorsCount: errorsList.length,
+    errors: errorsList
+  };
 }
 
 // ----------------- TẮT MÁY -----------------
@@ -2229,14 +2523,19 @@ async function deleteMachineFull(name) {
   };
 }
 
-// ----------------- QUÉT VÀ NÂNG CẤP WORKFLOW TRỰC TIẾP -----------------
+// ----------------- QUÉT VÀ NÂNG CẤP WORKFLOW TRỰC TIẾP (TỰ ĐỘNG PHỤC HỒI TỪ DATA NẾU THIẾU) -----------------
 async function scanAndRebuildWorkflowsDirect(upgradeToLatest = false) {
   const st = loadBridgeState();
   const cfg = getRdpConfig();
   st.machines = st.machines || {};
 
-  const contents = await ghRequest('GET', cfg.runnerRepo, '/contents/.github/workflows', null, cfg.token);
-  if (!Array.isArray(contents)) return { totalFiles: 0, scannedCount: 0, upgradedCount: 0, machines: [] };
+  let contents = [];
+  try {
+    contents = await ghRequest('GET', cfg.runnerRepo, '/contents/.github/workflows', null, cfg.token);
+  } catch (e) {
+    contents = [];
+  }
+  if (!Array.isArray(contents)) contents = [];
 
   const ymlFiles = contents.filter(f => f.type === 'file' && /\.(ya?ml)$/i.test(f.name));
   const ignored = ['taomay.yml', 'taomay.yaml', 'taomaygoc.yml', 'bot.yml', 'botcuadat.yml'];
@@ -2247,6 +2546,8 @@ async function scanAndRebuildWorkflowsDirect(upgradeToLatest = false) {
   if (upgradeToLatest) tpl = loadTaomayTemplate();
 
   const list = [];
+  const foundFileIds = new Set();
+
   for (const f of machineFiles) {
     try {
       const fDetail = await ghRequest('GET', cfg.runnerRepo, `/contents/${f.path}`, null, cfg.token);
@@ -2263,6 +2564,8 @@ async function scanAndRebuildWorkflowsDirect(upgradeToLatest = false) {
 
       const fileBaseId = f.name.replace(/\.(ya?ml)$/i, '').toLowerCase();
       const mId = fileBaseId;
+      foundFileIds.add(mId);
+
       const dName = (nameM && nameM[1]) || `Máy ${mId}`;
       const dur = (durM && durM[1]) || '5h00m';
       const pin = (pinM && pinM[1]) || 'Aistv2026';
@@ -2304,8 +2607,34 @@ async function scanAndRebuildWorkflowsDirect(upgradeToLatest = false) {
       list.push(cur);
     } catch {}
   }
+
+  // TỰ ĐỘNG PHỤC HỒI & ĐỒNG BỘ CÁC MÁY CÒN TRONG DATA NHƯNG CHƯA CÓ TRÊN RUNNER REPO MỚI
+  let restoredCount = 0;
+  for (const mId of Object.keys(st.machines)) {
+    if (!foundFileIds.has(mId.toLowerCase())) {
+      try {
+        const resEns = await ensureMachineWorkflowOnRunner(mId, cfg.runnerRepo);
+        if (resEns && resEns.created) {
+          restoredCount++;
+          const curM = st.machines[mId];
+          if (curM && !list.some(x => x.name === mId)) {
+            list.push(curM);
+          }
+        }
+      } catch (e) {
+        console.warn(`Lỗi tự động tái tạo workflow cho máy ${mId}:`, e.message);
+      }
+    }
+  }
+
   saveBridgeState(st);
-  return { totalFiles: ymlFiles.length, scannedCount: list.length, upgradedCount, machines: list };
+  return {
+    totalFiles: ymlFiles.length + restoredCount,
+    scannedCount: list.length,
+    upgradedCount,
+    restoredCount,
+    machines: list
+  };
 }
 
 // ----------------- ĐỒNG BỘ TRẠNG THÁI MÁY TỪ RUNNER REPO & STORAGE REPO -----------------
@@ -2485,8 +2814,8 @@ async function onMessage(msg) {
   }
 
   // 1c. LỆNH XÓA Ổ ĐĨA & XÓA MÁY
-  if (lower.startsWith('!may xoao') || lower.startsWith('!may reset') || lower.startsWith('!may xoao-dia')) {
-    const args = text.replace(/^!may\s+(xoao|reset|xoao-dia)\s*/i, '').trim().split(/\s+/).filter(Boolean);
+  if (lower.startsWith('!may xoao') || lower.startsWith('!may xoao-dia') || lower.startsWith('!may reseto') || lower.startsWith('!may reset-o')) {
+    const args = text.replace(/^!may\s+(xoao|xoao-dia|reseto|reset-o)\s*/i, '').trim().split(/\s+/).filter(Boolean);
     const mName = args[0];
     if (!mName) {
       await msg.reply('⚠️ Cú pháp: `!may xoao <tên_máy>`\nVí dụ: `!may xoao dat`\n*Lệnh này sẽ xóa ổ đĩa lưu trữ VHDX trên GitHub Release để máy tạo ổ mới tinh khi chạy lại.*').catch(() => {});
@@ -2612,11 +2941,153 @@ async function onMessage(msg) {
     const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
     rdp.config = rdp.config || {};
     rdp.config.runnerRepo = newRepo;
-    if (newToken) rdp.config.token = newToken;
+    if (newToken) {
+      rdp.config.token = newToken;
+      rdp.config.runnerToken = newToken;
+    }
     saveBridgeState(rdp);
     if (botCtx && typeof botCtx.saveNow === 'function') botCtx.saveNow();
 
-    await msg.channel.send(`✅ **ĐÃ ĐỔI RUNNER REPO THÀNH CÔNG!**\n• Nơi treo máy: \`${newRepo}\`\n• Kho lưu ổ đĩa gốc: \`${cfg.storageRepo}\`${newToken ? '\n• Đã cập nhật Token mới và xóa tin nhắn bảo mật!' : ''}`).catch(() => {});
+    const waitMsg = await msg.channel.send(`⏳ **ĐÃ ĐỔI RUNNER REPO SANG: \`${newRepo}\`!**\nĐang tự động đồng bộ toàn bộ máy cũ trong data sang repo mới...`).catch(() => {});
+    try {
+      const syncRes = await syncAllMachinesToRunnerRepo(newRepo);
+      const rep = [
+        `✅ **ĐÃ ĐỔI REPO & ĐỒNG BỘ TOÀN BỘ MÁY CŨ THÀNH CÔNG!**`,
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        `• 🏃 **Repo Treo Mới:** \`${newRepo}\``,
+        `• 📦 **Kho Lưu Ổ Đĩa Gốc:** \`${cfg.storageRepo}\``,
+        `• 🖥️ **Số máy cũ đã đồng bộ sang repo mới:** **${syncRes.syncedCount} / ${syncRes.totalInData} máy**`,
+        syncRes.syncedMachines.length ? `• 📋 **Danh sách máy:** ${syncRes.syncedMachines.map(m => `\`${m}\``).join(', ')}` : '',
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        `✨ *Toàn bộ máy cũ đã sẵn sàng! Gõ \`!may\` để điều khiển.*`
+      ].filter(Boolean).join('\n');
+      if (waitMsg && waitMsg.edit) await waitMsg.edit(rep).catch(() => {});
+      else await msg.channel.send(rep).catch(() => {});
+    } catch (syncErr) {
+      const repErr = `⚠️ Đã lưu Runner Repo mới \`${newRepo}\`, nhưng xảy ra lỗi đồng bộ máy: ${syncErr.message}\n👉 Gõ \`!may dongbo\` để chạy lại đồng bộ.`;
+      if (waitMsg && waitMsg.edit) await waitMsg.edit(repErr).catch(() => {});
+      else await msg.channel.send(repErr).catch(() => {});
+    }
+    return true;
+  }
+
+  // 1b2. LỆNH ĐỒNG BỘ TOÀN BỘ MÁY CŨ SANG REPO MỚI
+  if (lower.startsWith('!may dongbo') || lower.startsWith('!may syncrepo') || lower.startsWith('!may chuyenrepo') || lower.startsWith('!may sangrepo')) {
+    if (!isRootAdmin(uid, cfg.rootAdmin)) {
+      await msg.reply('🚫 Chỉ có Admin Tối Cao (`946662197168341053`) mới có quyền thực hiện lệnh đồng bộ toàn bộ máy sang repo mới!').catch(() => {});
+      return true;
+    }
+    const args = text.replace(/^!may\s+(dongbo|syncrepo|chuyenrepo|sangrepo)\s*/i, '').trim().split(/\s+/).filter(Boolean);
+    const targetRepo = (args[0] && args[0].includes('/')) ? args[0] : cfg.runnerRepo;
+    const targetToken = args[1];
+
+    if (targetToken) msg.delete().catch(() => {});
+
+    if (targetRepo && targetRepo !== cfg.runnerRepo) {
+      const d = (botCtx && typeof botCtx.db === 'function' ? botCtx.db() : null) || loadBridgeState();
+      const rdp = d.rdp || (d.shared && d.shared.rdp) || d;
+      rdp.config = rdp.config || {};
+      rdp.config.runnerRepo = targetRepo;
+      if (targetToken) {
+        rdp.config.token = targetToken;
+        rdp.config.runnerToken = targetToken;
+      }
+      saveBridgeState(rdp);
+      if (botCtx && typeof botCtx.saveNow === 'function') botCtx.saveNow();
+    }
+
+    const waitMsg = await msg.reply(`⏳ Đang đồng bộ toàn bộ máy ảo từ dữ liệu (\`data.json\`) sang Runner Repo \`${targetRepo}\`...`).catch(() => {});
+    try {
+      const res = await syncAllMachinesToRunnerRepo(targetRepo);
+      const rep = [
+        `🎉 **HOÀN TẤT ĐỒNG BỘ TOÀN BỘ MÁY ẢO SANG REPO MỚI!**`,
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        `• 🏃 **Runner Repo (Treo máy):** \`${res.runnerRepo}\``,
+        `• 📦 **Storage Repo (Ổ đĩa):** \`${res.storageRepo}\``,
+        `• 📊 **Tổng số máy trong dữ liệu:** **${res.totalInData} máy**`,
+        `• 🚀 **Số máy đã đồng bộ / tạo workflow thành công:** **${res.syncedCount} máy**`,
+        res.importedCount > 0 ? `• 📥 **Số máy quét thêm từ repo:** **${res.importedCount} máy**` : '',
+        res.errorsCount > 0 ? `• ⚠️ **Số máy lỗi:** **${res.errorsCount} máy**` : '',
+        res.syncedMachines && res.syncedMachines.length ? `• 🖥️ **Danh sách máy:** ${res.syncedMachines.map(m => `\`${m}\``).join(', ')}` : '',
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        `💡 *Bây giờ tất cả máy cũ đã được chuyển sang repo mới an toàn, giữ nguyên ổ đĩa và cấu hình! Gõ \`!may\` để điều khiển.*`
+      ].filter(Boolean).join('\n');
+      if (waitMsg && waitMsg.edit) await waitMsg.edit(rep).catch(() => {});
+      else await msg.channel.send(rep).catch(() => {});
+    } catch (err) {
+      const errMsg = `❌ **LỖI ĐỒNG BỘ MÁY SANG REPO MỚI:** ${err.message}\n💡 *Hãy kiểm tra lại quyền PAT Token hoặc tên Runner Repo (\`${targetRepo}\`).*`;
+      if (waitMsg && waitMsg.edit) await waitMsg.edit(errMsg).catch(() => {});
+      else await msg.channel.send(errMsg).catch(() => {});
+    }
+    return true;
+  }
+
+  // 1b3. LỆNH BẬT MÁY TRỰC TIẾP (!may bat / !may start)
+  if (lower.startsWith('!may bat') || lower.startsWith('!may start') || lower.startsWith('!may chay')) {
+    const args = text.replace(/^!may\s+(bat|start|chay)\s*/i, '').trim().split(/\s+/).filter(Boolean);
+    const nameArg = (args[0] || (rdp.selectedVm && rdp.selectedVm[uid]) || Object.keys(rdp.machines || {})[0] || '').toLowerCase();
+    if (!nameArg) {
+      await msg.reply('⚠️ Cú pháp: `!may bat <tên_máy>`\nVí dụ: `!may bat may-1`').catch(() => {});
+      return true;
+    }
+    const m = (rdp.machines || {})[nameArg];
+    if (!isRootAdmin(uid, cfg.rootAdmin) && (!m || m.ownerId !== uid)) {
+      await msg.reply('🚫 Bạn không có quyền bật máy này vì không phải chủ sở hữu hay Admin!').catch(() => {});
+      return true;
+    }
+    await msg.reply(`⏳ Đang khởi động máy **${(m?.displayName || nameArg).toUpperCase()}** trên \`${cfg.runnerRepo}\`...`).catch(() => {});
+    try {
+      await startMachineWorkflow(nameArg);
+      await msg.channel.send(`✅ **ĐÃ BẬT MÁY [${(m?.displayName || nameArg).toUpperCase()}] THÀNH CÔNG!**\n• Nơi treo: \`${cfg.runnerRepo}\`\n• Ổ đĩa: \`${cfg.storageRepo}\`\n• Trạng thái: Đang khởi tạo phiên chạy...`).catch(() => {});
+    } catch (err) {
+      await msg.channel.send(`❌ Lỗi bật máy **${nameArg}**: ${err.message}`).catch(() => {});
+    }
+    return true;
+  }
+
+  // 1b4. LỆNH KHỞI ĐỘNG LẠI MÁY TRỰC TIẾP (!may reset / !may restart)
+  if (lower.startsWith('!may reset') || lower.startsWith('!may restart') || lower.startsWith('!may khoidonglai')) {
+    const args = text.replace(/^!may\s+(reset|restart|khoidonglai)\s*/i, '').trim().split(/\s+/).filter(Boolean);
+    const nameArg = (args[0] || (rdp.selectedVm && rdp.selectedVm[uid]) || Object.keys(rdp.machines || {})[0] || '').toLowerCase();
+    if (!nameArg) {
+      await msg.reply('⚠️ Cú pháp: `!may reset <tên_máy>`\nVí dụ: `!may reset may-1`').catch(() => {});
+      return true;
+    }
+    const m = (rdp.machines || {})[nameArg];
+    if (!isRootAdmin(uid, cfg.rootAdmin) && (!m || m.ownerId !== uid)) {
+      await msg.reply('🚫 Bạn không có quyền khởi động lại máy này vì không phải chủ sở hữu hay Admin!').catch(() => {});
+      return true;
+    }
+    await msg.reply(`🔁 Đang khởi động lại phiên mới cho máy **${(m?.displayName || nameArg).toUpperCase()}**...`).catch(() => {});
+    try {
+      await restartMachineWorkflow(nameArg);
+      await msg.channel.send(`✅ **ĐÃ KHỞI ĐỘNG LẠI MÁY [${(m?.displayName || nameArg).toUpperCase()}]!**`).catch(() => {});
+    } catch (err) {
+      await msg.channel.send(`❌ Lỗi khởi động lại máy **${nameArg}**: ${err.message}`).catch(() => {});
+    }
+    return true;
+  }
+
+  // 1b5. LỆNH TẮT MÁY TRỰC TIẾP (!may tat / !may stop)
+  if (lower.startsWith('!may tat') || lower.startsWith('!may stop') || lower.startsWith('!may dung')) {
+    const args = text.replace(/^!may\s+(tat|stop|dung)\s*/i, '').trim().split(/\s+/).filter(Boolean);
+    const nameArg = (args[0] || (rdp.selectedVm && rdp.selectedVm[uid]) || Object.keys(rdp.machines || {})[0] || '').toLowerCase();
+    if (!nameArg) {
+      await msg.reply('⚠️ Cú pháp: `!may tat <tên_máy>`\nVí dụ: `!may tat may-1`').catch(() => {});
+      return true;
+    }
+    const m = (rdp.machines || {})[nameArg];
+    if (!isRootAdmin(uid, cfg.rootAdmin) && (!m || m.ownerId !== uid)) {
+      await msg.reply('🚫 Bạn không có quyền tắt máy này vì không phải chủ sở hữu hay Admin!').catch(() => {});
+      return true;
+    }
+    await msg.reply(`🛑 Đang dừng máy **${(m?.displayName || nameArg).toUpperCase()}**...`).catch(() => {});
+    try {
+      await stopMachineWorkflow(nameArg);
+      await msg.channel.send(`✅ **ĐÃ GỬI LỆNH LƯU Ổ ĐĨA VÀ TẮT MÁY [${(m?.displayName || nameArg).toUpperCase()}]!**`).catch(() => {});
+    } catch (err) {
+      await msg.channel.send(`❌ Lỗi tắt máy **${nameArg}**: ${err.message}`).catch(() => {});
+    }
     return true;
   }
 
@@ -3314,19 +3785,21 @@ async function onButton(i) {
         if (curKey) {
           const curM = rdp.machines && rdp.machines[curKey];
           if (actVal === 'start') {
+            await ensureMachineWorkflowOnRunner(curKey, cfg.runnerRepo);
             await dispatchWorkflow(cfg.runnerRepo, `${curKey}.yml`, {
               duration: normalizeDuration(curM?.duration),
               pin_code: curM?.gvPin || 'Aistv2026'
-            }, cfg.token);
-            if (curM) { curM.status = 'in_progress'; curM.isOnline = true; }
+            }, cfg.runnerToken || cfg.token);
+            if (curM) { curM.status = 'in_progress'; curM.isOnline = true; curM.repo = cfg.runnerRepo; }
           } else if (actVal === 'restart') {
-            await cancelWorkflowRuns(cfg.runnerRepo, `${curKey}.yml`, cfg.token);
+            await cancelWorkflowRuns(cfg.runnerRepo, `${curKey}.yml`, cfg.token).catch(() => {});
+            await ensureMachineWorkflowOnRunner(curKey, cfg.runnerRepo);
             await new Promise(r => setTimeout(r, 2000));
             await dispatchWorkflow(cfg.runnerRepo, `${curKey}.yml`, {
               duration: normalizeDuration(curM?.duration),
               pin_code: curM?.gvPin || 'Aistv2026'
-            }, cfg.token);
-            if (curM) { curM.status = 'in_progress'; curM.isOnline = true; }
+            }, cfg.runnerToken || cfg.token);
+            if (curM) { curM.status = 'in_progress'; curM.isOnline = true; curM.repo = cfg.runnerRepo; }
           } else if (actVal === 'stop') {
             await cancelWorkflowRuns(cfg.runnerRepo, `${curKey}.yml`, cfg.token);
             if (curM) { curM.status = 'completed'; curM.isOnline = false; }
@@ -3424,10 +3897,13 @@ module.exports = {
   dispatchWorkflow,
   cancelWorkflowRuns,
   createMachineWorkflow,
+  ensureMachineWorkflowOnRunner,
+  startMachineWorkflow,
   restartMachineWorkflow,
   stopMachineWorkflow,
   deleteMachineDisk,
   deleteMachineFull,
+  syncAllMachinesToRunnerRepo,
   scanAndRebuildWorkflowsDirect,
   syncAllMachinesWithGithub,
   getRdpVars,
